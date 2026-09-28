@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Images</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #ffffff;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: #334155;
+    }
+
+    .drop-zone {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px dashed transparent;
+      transition: background 0.15s, border-color 0.15s;
+      cursor: pointer;
+    }
+
+    .drop-zone.dragover {
+      background: #f8fafc;
+      border-color: #94a3b8;
+    }
+
+    .drop-zone p {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      pointer-events: none;
+    }
+
+    #fileInput { display: none; }
+
+    .gallery {
+      position: fixed;
+      inset: 0;
+      overflow: auto;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 12px;
+      align-content: start;
+      pointer-events: none;
+    }
+
+    .gallery:empty { display: none; }
+
+    .card {
+      pointer-events: auto;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e2e8f0;
+      position: relative;
+    }
+
+    .card img {
+      width: 100%;
+      height: 130px;
+      object-fit: cover;
+      display: block;
+      background: #f1f5f9;
+    }
+
+    .card .delete-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 24px;
+      height: 24px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card:hover .delete-btn {
+      display: flex;
+    }
+
+    .status {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      background: #f1f5f9;
+      color: #334155;
+      display: none;
+      z-index: 10;
+    }
+
+    .status.show { display: block; }
+    .status.error { background: #fef2f2; color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="drop-zone" id="dropZone">
+    <p id="hint">Drop or Ctrl+V</p>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+  </div>
+
+  <div class="gallery" id="gallery"></div>
+  <div class="status" id="status"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      deleteDoc,
+      doc,
+      orderBy,
+      query,
+      serverTimestamp,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCcimoiLZArgPYiOxA265mSf1svsk_ZJwA",
+      authDomain: "centeral-place.firebaseapp.com",
+      projectId: "centeral-place",
+      storageBucket: "centeral-place.firebasestorage.app",
+      messagingSenderId: "405215574357",
+      appId: "1:405215574357:web:ede39d7a2a51b5540e17dc",
+      measurementId: "G-EYWES5G5K8"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const imagesCol = collection(db, "images");
+
+    const dropZone = document.getElementById("dropZone");
+    const fileInput = document.getElementById("fileInput");
+    const gallery = document.getElementById("gallery");
+    const statusEl = document.getElementById("status");
+    const hint = document.getElementById("hint");
+
+    function showStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = "status show" + (isError ? " error" : "");
+      clearTimeout(showStatus._t);
+      showStatus._t = setTimeout(() => {
+        statusEl.className = "status";
+      }, 2200);
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadFiles(files) {
+      const list = Array.from(files).filter(f => f.type && f.type.startsWith("image/"));
+      if (!list.length) {
+        showStatus("Only images", true);
+        return;
+      }
+
+      const MAX = 800 * 1024;
+
+      for (const file of list) {
+        if (file.size > MAX) {
+          showStatus("Max 800 KB", true);
+          continue;
+        }
+        try {
+          showStatus("Uploading...");
+          const base64 = await fileToBase64(file);
+          await addDoc(imagesCol, {
+            name: file.name || "paste-" + Date.now() + ".png",
+            type: file.type,
+            size: file.size,
+            base64,
+            createdAt: serverTimestamp()
+          });
+          showStatus("Saved");
+        } catch (err) {
+          console.error(err);
+          showStatus(err.message || "Error", true);
+        }
+      }
+    }
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("dragover");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragover");
+      if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files.length) uploadFiles(fileInput.files);
+      fileInput.value = "";
+    });
+
+    document.addEventListener("paste", (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      const files = [];
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length) {
+        e.preventDefault();
+        uploadFiles(files);
+      }
+    });
+
+    const q = query(imagesCol, orderBy("createdAt", "desc"));
+
+    onSnapshot(q, (snapshot) => {
+      gallery.innerHTML = "";
+      const docs = snapshot.docs;
+
+      if (docs.length === 0) {
+        hint.style.display = "block";
+        return;
+      }
+
+      hint.style.display = "none";
+
+      docs.forEach((d) => {
+        const data = d.data();
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = '<img src="' + data.base64 + '" alt="" loading="lazy"><button class="delete-btn" title="Delete">x</button>';
+        card.querySelector(".delete-btn").addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await deleteDoc(doc(db, "images", d.id));
+          } catch (err) {
+            showStatus(err.message || "Error", true);
+          }
+        });
+        gallery.appendChild(card);
+      });
+    }, (error) => {
+      console.error(error);
+      showStatus("Firestore error — check Rules", true);
+    });
+  </script>
+</body>
+</html>
