@@ -7,81 +7,153 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    body {
-      background: #ffffff;
-      min-height: 100vh;
-      font-family: system-ui, -apple-system, sans-serif;
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #0a0a0a;
       overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
     }
 
     .zone {
-      min-height: 100vh;
       width: 100%;
+      height: 100%;
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
-      position: relative;
-      cursor: default;
+      background: #0a0a0a;
     }
 
     .zone.dragover {
-      background: #f8fafc;
+      background: #141414;
     }
 
-    .zone.has-image {
-      background: #000;
+    .zone.dragover::after {
+      content: "";
+      position: absolute;
+      inset: 12px;
+      border: 2px dashed #404040;
+      border-radius: 12px;
+      pointer-events: none;
+      z-index: 2;
+      animation: pulseBorder 1s ease-in-out infinite;
+    }
+
+    @keyframes pulseBorder {
+      0%, 100% { opacity: 0.45; }
+      50% { opacity: 1; }
     }
 
     #preview {
-      max-width: 100vw;
-      max-height: 100vh;
-      width: auto;
-      height: auto;
-      object-fit: contain;
-      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      filter: blur(32px) brightness(0.8);
+      transform: scale(1.05);
+      transition:
+        opacity 0.08s linear,
+        filter 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: opacity, filter, transform;
     }
 
-    .zone.has-image #preview {
-      display: block;
+    #preview.blur-in {
+      opacity: 1;
+      filter: blur(32px) brightness(0.8);
+      transform: scale(1.05);
+    }
+
+    #preview.sharp {
+      opacity: 1;
+      filter: blur(0) brightness(1);
+      transform: scale(1);
+    }
+
+    #preview.leaving {
+      opacity: 0;
+      filter: blur(20px);
+      transform: scale(1.03);
+      transition: opacity 0.2s ease, filter 0.2s ease, transform 0.2s ease;
     }
 
     .hint {
-      color: #94a3b8;
+      color: #525252;
       font-size: 0.95rem;
-      position: absolute;
+      z-index: 1;
       pointer-events: none;
+      letter-spacing: 0.02em;
+      transition: opacity 0.25s ease, color 0.2s ease;
     }
 
-    .zone.has-image .hint {
-      display: none;
+    .zone.has-image .hint { opacity: 0; }
+    .zone.dragover .hint { color: #a3a3a3; }
+
+    .loader {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      width: 0%;
+      background: linear-gradient(90deg, #333, #bbb, #333);
+      background-size: 200% 100%;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .loader.active {
+      opacity: 1;
+      width: 100%;
+      animation: shimmer 0.8s linear infinite;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
 
     #fileInput { display: none; }
 
     .status {
       position: fixed;
-      bottom: 20px;
+      bottom: 18px;
       left: 50%;
-      transform: translateX(-50%);
-      padding: 8px 16px;
+      transform: translateX(-50%) translateY(6px);
+      padding: 7px 14px;
       border-radius: 8px;
-      font-size: 0.85rem;
-      background: #f1f5f9;
-      color: #334155;
-      display: none;
+      font-size: 0.82rem;
+      background: #1a1a1a;
+      color: #d4d4d4;
+      border: 1px solid #333;
+      opacity: 0;
+      transition: opacity 0.2s ease, transform 0.2s ease;
       z-index: 10;
+      pointer-events: none;
     }
 
-    .status.show { display: block; }
-    .status.error { background: #fef2f2; color: #b91c1c; }
+    .status.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .status.error {
+      background: #1c1010;
+      color: #f87171;
+      border-color: #7f1d1d;
+    }
   </style>
 </head>
 <body>
   <div class="zone" id="zone">
-    <p class="hint" id="hint">Drop or Ctrl+V</p>
+    <p class="hint">Drop or Ctrl+V</p>
     <img id="preview" src="" alt="">
     <input type="file" id="fileInput" accept="image/*">
   </div>
+  <div class="loader" id="loader"></div>
   <div class="status" id="status"></div>
 
   <script type="module">
@@ -106,23 +178,25 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
-
-    // Bitta document — butun app uchun bitta rasm
     const imageRef = doc(db, "app", "mainImage");
 
     const zone = document.getElementById("zone");
     const preview = document.getElementById("preview");
-    const fileInput = document.getElementById("fileInput");
     const statusEl = document.getElementById("status");
-    const hint = document.getElementById("hint");
+    const loader = document.getElementById("loader");
+
+    let currentSrc = "";
+    let localToken = 0;
 
     function showStatus(msg, isError = false) {
       statusEl.textContent = msg;
       statusEl.className = "status show" + (isError ? " error" : "");
       clearTimeout(showStatus._t);
-      showStatus._t = setTimeout(() => {
-        statusEl.className = "status";
-      }, 2000);
+      showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1500);
+    }
+
+    function setLoader(on) {
+      loader.classList.toggle("active", !!on);
     }
 
     function fileToBase64(file) {
@@ -134,6 +208,44 @@
       });
     }
 
+    function showImage(src) {
+      if (!src) {
+        preview.classList.remove("sharp", "blur-in");
+        preview.classList.add("leaving");
+        setTimeout(() => {
+          preview.src = "";
+          preview.classList.remove("leaving");
+          zone.classList.remove("has-image");
+          currentSrc = "";
+        }, 200);
+        return;
+      }
+
+      if (src === currentSrc) return;
+
+      const reveal = () => {
+        preview.src = src;
+        currentSrc = src;
+        zone.classList.add("has-image");
+        preview.classList.remove("leaving", "sharp");
+        // force paint as blur first
+        preview.classList.add("blur-in");
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            preview.classList.add("sharp");
+          });
+        });
+      };
+
+      if (preview.classList.contains("sharp") || preview.classList.contains("blur-in")) {
+        preview.classList.remove("sharp", "blur-in");
+        preview.classList.add("leaving");
+        setTimeout(reveal, 180);
+      } else {
+        reveal();
+      }
+    }
+
     async function uploadOne(file) {
       if (!file || !file.type || !file.type.startsWith("image/")) {
         showStatus("Only images", true);
@@ -143,24 +255,38 @@
         showStatus("Max 800 KB", true);
         return;
       }
+
+      const token = ++localToken;
       try {
-        showStatus("Uploading...");
+        setLoader(true);
         const base64 = await fileToBase64(file);
+
+        // Optimistic: darhol localda ko'rsat
+        showImage(base64);
+
+        // Firestore — boshqa clientlar realtime oladi
         await setDoc(imageRef, {
           base64,
           name: file.name || "paste-" + Date.now() + ".png",
           type: file.type,
           size: file.size,
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
+          t: Date.now()
         });
-        showStatus("Saved");
+
+        if (token === localToken) {
+          setLoader(false);
+          showStatus("Saved");
+        }
       } catch (err) {
         console.error(err);
-        showStatus(err.message || "Error", true);
+        if (token === localToken) {
+          setLoader(false);
+          showStatus(err.message || "Error", true);
+        }
       }
     }
 
-    // Drag & drop
     zone.addEventListener("dragover", (e) => {
       e.preventDefault();
       zone.classList.add("dragover");
@@ -173,7 +299,6 @@
       if (f) uploadOne(f);
     });
 
-    // Ctrl+V
     document.addEventListener("paste", (e) => {
       const items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
@@ -187,15 +312,20 @@
       }
     });
 
-    // Realtime — bitta rasm
-    onSnapshot(imageRef, (snap) => {
-      if (snap.exists() && snap.data().base64) {
-        preview.src = snap.data().base64;
-        zone.classList.add("has-image");
-      } else {
-        preview.src = "";
-        zone.classList.remove("has-image");
+    // Realtime — har qanday o'zgarish darhol
+    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
+      if (!snap.exists()) {
+        showImage("");
+        return;
       }
+      const data = snap.data();
+      if (!data || !data.base64) {
+        showImage("");
+        return;
+      }
+      // Agar hozir local yuklayotgan bo'lsak va bir xil rasm bo'lsa — skip
+      if (data.base64 === currentSrc) return;
+      showImage(data.base64);
     }, (err) => {
       console.error(err);
       showStatus("Firestore error — check Rules", true);
