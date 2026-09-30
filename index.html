@@ -171,6 +171,7 @@
       getFirestore,
       doc,
       setDoc,
+      getDoc,
       onSnapshot,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
@@ -187,6 +188,7 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const imageRef = doc(db, "app", "mainImage");
+    const strokesRef = doc(db, "app", "strokes");
 
     const zone = document.getElementById("zone");
     const preview = document.getElementById("preview");
@@ -203,6 +205,13 @@
     let lastY = 0;
     const lineWidth = 8;
     const currentColor = "#ff0000";
+
+    // ----- realtime stroke sync -----
+    const myId = Math.random().toString(36).slice(2, 10);
+    const remoteIds = new Set();      // biz bilgan barcha segmentlar (o'zimizniki ham)
+    let strokeBuffer = [];            // yuborilmagan segmentlar
+    let flushTimer = null;
+    let serverStrokes = [];           // serverdagi oxirgi holat (resize uchun)
 
     function showStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -258,12 +267,29 @@
       }
     }
 
+    // ----- canvas helpers -----
     function updateCursorPosition(e) {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       cursorPreview.style.left = `${x}px`;
       cursorPreview.style.top = `${y}px`;
+    }
+
+    function drawSegment(s) {
+      ctx.strokeStyle = s.c;
+      ctx.lineWidth = s.w;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(s.x0, s.y0);
+      ctx.lineTo(s.x1, s.y1);
+      ctx.stroke();
+    }
+
+    function redrawAll() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const s of serverStrokes) drawSegment(s);
     }
 
     function startDrawing(e) {
@@ -273,10 +299,6 @@
       const rect = canvas.getBoundingClientRect();
       lastX = e.clientX - rect.left;
       lastY = e.clientY - rect.top;
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.lineWidth = lineWidth;
-      ctx.strokeStyle = currentColor;
       cursorPreview.classList.add("active");
       updateCursorPosition(e);
     }
@@ -288,10 +310,15 @@
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      ctx.beginPath();
-      ctx.moveTo(lastX, lastY);
-      ctx.lineTo(x, y);
-      ctx.stroke();
+      const s = {
+        id: myId + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+        x0: lastX, y0: lastY, x1: x, y1: y,
+        c: currentColor, w: lineWidth, t: Date.now()
+      };
+      drawSegment(s);
+      remoteIds.add(s.id);
+      serverStrokes.push(s);
+      queueStroke(s);
       lastX = x;
       lastY = y;
     }
@@ -300,6 +327,52 @@
       isDrawing = false;
     }
 
+    // ----- stroke sync -----
+    function queueStroke(s) {
+      strokeBuffer.push(s);
+      if (flushTimer) return;
+      flushTimer = setTimeout(flushStrokes, 150);
+    }
+
+    async function flushStrokes() {
+      flushTimer = null;
+      const batch = strokeBuffer.splice(0);
+      if (!batch.length) return;
+      try {
+        const snap = await getDoc(strokesRef);
+        const existing = snap.exists() ? (snap.data().items || []) : [];
+        const merged = existing.concat(batch).slice(-3000);
+        await setDoc(strokesRef, { items: merged, updatedAt: serverTimestamp() });
+      } catch (e) {
+        console.error("stroke push failed", e);
+        showStatus("Stroke sync error", true);
+      }
+    }
+
+    onSnapshot(strokesRef, (snap) => {
+      if (!snap.exists()) {
+        serverStrokes = [];
+        remoteIds.clear();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+      const items = snap.data().items || [];
+      serverStrokes = items;
+
+      // faqat yangi (biz hali chizmagan) segmentlarni chizamiz
+      let drew = false;
+      for (const s of items) {
+        if (remoteIds.has(s.id)) continue;
+        drawSegment(s);
+        remoteIds.add(s.id);
+        drew = true;
+      }
+      if (drew) {
+        // hech narsa — redrawAll kerak emas
+      }
+    });
+
+    // ----- rasm yuklash -----
     async function uploadOne(file) {
       if (!file || !file.type || !file.type.startsWith("image/")) {
         showStatus("Only images", true);
@@ -322,6 +395,13 @@
           updatedAt: serverTimestamp(),
           t: Date.now()
         });
+        // yangi rasm → eski chiziqlarni tozalash
+        serverStrokes = [];
+        remoteIds.clear();
+        strokeBuffer = [];
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        await setDoc(strokesRef, { items: [], updatedAt: serverTimestamp() });
+
         if (token === localToken) {
           setLoader(false);
           showStatus("Saved");
@@ -345,6 +425,7 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
+      redrawAll();
     }
 
     zone.addEventListener("dragover", (e) => {
