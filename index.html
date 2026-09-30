@@ -265,7 +265,6 @@
     const lineWidth = 8;
     const currentColor = "#ff0000";
 
-    // ---- rasm holati ----
     const image = new Image();
     image.crossOrigin = "anonymous";
     let imageReady = false;
@@ -297,7 +296,6 @@
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
 
-    // ---- canvas o'lchamlari va DPR ----
     let canvasW = 0, canvasH = 0;
     let dpr = 1;
 
@@ -419,16 +417,13 @@
       image.src = src;
     }
 
-    // ---- chizish ----
     function drawImage() {
       if (!imageReady) return;
       const r = getImageRect();
-      // ekranga proyeksiya: view orqali
       const x = r.left * view.scale + view.tx;
       const y = r.top * view.scale + view.ty;
       const w = r.width * view.scale;
       const h = r.height * view.scale;
-      // rasm chegarasidan tashqariga chiqmaslik
       ctx.save();
       ctx.beginPath();
       ctx.rect(0, 0, canvasW, canvasH);
@@ -443,7 +438,6 @@
       const a = normToScreen(s.x0, s.y0);
       const b = normToScreen(s.x1, s.y1);
       ctx.strokeStyle = s.c;
-      // chiziq qalinligi ham zoom bilan masshtablanadi — rasm bilan birga
       ctx.lineWidth = s.w * view.scale;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -459,7 +453,6 @@
       for (const s of localSegments.values()) drawSegmentNorm(s);
     }
 
-    // ---- cursor sync ----
     function sendCursor(nx, ny) {
       const now = performance.now();
       if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
@@ -552,7 +545,9 @@
     }
 
     function onPointerDown(e) {
-      canvas.setPointerCapture(e.pointerId).catch(() => {});
+      // TUZATILDI: setPointerCapture undefined qaytaradi, .catch() emas, try/catch ishlatish kerak
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
