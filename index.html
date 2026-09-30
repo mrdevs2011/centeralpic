@@ -144,26 +144,12 @@
       touch-action: none;
       cursor: crosshair;
     }
-    .cursor-preview {
-      position: absolute;
-      width: 28px;
-      height: 28px;
-      border: 2px solid #fff;
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 30;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 0 0 2px rgba(0,0,0,0.6);
-      opacity: 0.85;
-      display: none;
-    }
-    .cursor-preview.active { display: block; }
 
     .remote-cursor {
       position: absolute;
       pointer-events: none;
       z-index: 25;
-      transition: transform 80ms linear, opacity 200ms ease;
+      transition: opacity 200ms ease;
       opacity: 0;
       will-change: transform;
       left: 0;
@@ -181,8 +167,8 @@
     }
     .remote-cursor .label {
       position: absolute;
-      top: 12px;
-      left: 12px;
+      top: 8px;
+      left: 10px;
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 4px;
@@ -194,7 +180,6 @@
       border: 1px solid currentColor;
     }
 
-    /* zoom tugmalari */
     .zoom-controls {
       position: fixed;
       top: 14px;
@@ -245,7 +230,6 @@
     <img id="preview" src="" alt="">
     <input type="file" id="fileInput" accept="image/*">
     <canvas id="canvas"></canvas>
-    <div class="cursor-preview" id="cursorPreview"></div>
   </div>
 
   <div class="zoom-controls">
@@ -305,7 +289,6 @@
     const statusEl = document.getElementById("status");
     const loader = document.getElementById("loader");
     const canvas = document.getElementById("canvas");
-    const cursorPreview = document.getElementById("cursorPreview");
     const ctx = canvas.getContext("2d");
     const zoomBadge = document.getElementById("zoomBadge");
 
@@ -314,13 +297,12 @@
     const lineWidth = 8;
     const currentColor = "#ff0000";
 
-    // ---- viewport (zoom/pan) ----
-    // view = { scale, tx, ty } — ekran = view * canvas_coord (CSS px)
+    // ---- viewport ----
     const view = { scale: 1, tx: 0, ty: 0 };
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 8;
 
-    // ---- pointer holati ----
+    // ---- stroke holati (normalized 0..1) ----
     let lastSentX = 0;
     let lastSentY = 0;
     let lastPointerX = 0;
@@ -332,23 +314,20 @@
     const undoStack = [];
     const MAX_UNDO = 100;
 
+    // ---- cursor sync ----
     const myCursorRef = ref(rtdb, "cursors/" + myId);
     const remoteCursors = new Map();
     let lastCursorSend = 0;
     const CURSOR_SEND_INTERVAL = 40;
 
-    // ---- pointer tracking (multi-touch) ----
-    const activePointers = new Map(); // pointerId -> {x, y}
+    // ---- pointer tracking ----
+    const activePointers = new Map();
     let isDrawing = false;
-    let isPanning = false;
     let pinchStartDist = 0;
     let pinchStartScale = 1;
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
-    let panStartPointer = { x: 0, y: 0 };
-    let panStartView = { tx: 0, ty: 0 };
 
-    // ---- rasm maydoni (object-fit: contain) ----
     function getImageRect() {
       const zoneRect = zone.getBoundingClientRect();
       const zW = zoneRect.width;
@@ -363,10 +342,7 @@
       return { left, top, width: w, height: h };
     }
 
-    // ekran (canvas-relative CSS px) -> normalized image coords (0..1)
-    // endi viewport transformatsiyasini ham hisobga oladi
     function screenToNorm(px, py) {
-      // avval viewport teskarisiga
       const cx = (px - view.tx) / view.scale;
       const cy = (py - view.ty) / view.scale;
       const r = getImageRect();
@@ -376,7 +352,6 @@
       };
     }
 
-    // normalized -> ekran (canvas-relative CSS px)
     function normToScreen(nx, ny) {
       const r = getImageRect();
       const cx = r.left + nx * r.width;
@@ -391,7 +366,10 @@
       redrawAll();
       for (const [uid, c] of remoteCursors) {
         const p = normToScreen(c.nx, c.ny);
+        c.el.style.transition = "none";
         c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+        void c.el.offsetWidth;
+        c.el.style.transition = "";
       }
       showZoomBadge();
     }
@@ -403,11 +381,8 @@
       showZoomBadge._t = setTimeout(() => zoomBadge.classList.remove("show"), 1200);
     }
 
-    // ekran markaziga nisbatan scale qilish
     function zoomAt(px, py, newScale) {
       newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
-      // px,py — ekran koordinatasi (canvas-relative CSS px)
-      // shu nuqta ostidagi canvas koordinatasi o'zgarmasligi kerak:
       const cx = (px - view.tx) / view.scale;
       const cy = (py - view.ty) / view.scale;
       view.scale = newScale;
@@ -483,19 +458,10 @@
       }
     }
 
-    function updateCursorPosition(clientX, clientY) {
-      const rect = canvas.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      cursorPreview.style.left = `${x}px`;
-      cursorPreview.style.top = `${y}px`;
-    }
-
     function drawSegmentNorm(s) {
       const a = normToScreen(s.x0, s.y0);
       const b = normToScreen(s.x1, s.y1);
       ctx.strokeStyle = s.c;
-      // chiziq qalinligi zoom bilan masshtablanadi
       ctx.lineWidth = s.w * view.scale;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -587,7 +553,6 @@
       try { remove(myCursorRef); } catch (e) {}
     });
 
-    // ---- pinch center yordamchisi ----
     function getPinchCenter() {
       const pts = Array.from(activePointers.values());
       const x = (pts[0].x + pts[1].x) / 2;
@@ -602,36 +567,27 @@
       return Math.hypot(dx, dy);
     }
 
-    // ---- pointer events ----
     function onPointerDown(e) {
       canvas.setPointerCapture(e.pointerId).catch(() => {});
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
-      activePointers.set(e.pointerId, { x: px, y: py, startX: px, startY: py });
+      activePointers.set(e.pointerId, { x: px, y: py });
 
       if (activePointers.size === 1) {
-        // yagona pointer — chizish boshlandi
         isDrawing = true;
-        isPanning = false;
         const n = screenToNorm(px, py);
         lastSentX = n.x;
         lastSentY = n.y;
         lastPointerX = n.x;
         lastPointerY = n.y;
-        cursorPreview.classList.add("active");
-        updateCursorPosition(e.clientX, e.clientY);
         sendCursor(n.x, n.y);
       } else if (activePointers.size === 2) {
-        // ikki barmoq — pinch boshlanadi, chizishni bekor qilamiz
         isDrawing = false;
-        isPanning = true;
-        const pts = Array.from(activePointers.values());
         pinchStartDist = getPinchDist();
         pinchStartScale = view.scale;
         pinchStartCenter = getPinchCenter();
         pinchStartView = { tx: view.tx, ty: view.ty };
-        cursorPreview.classList.remove("active");
       }
     }
 
@@ -639,17 +595,15 @@
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
+
       if (!activePointers.has(e.pointerId)) {
-        // hover (pointer down emas)
-        updateCursorPosition(e.clientX, e.clientY);
         const n = screenToNorm(px, py);
         sendCursor(n.x, n.y);
         return;
       }
-      activePointers.set(e.pointerId, { x: px, y: py, startX: px, startY: py });
+      activePointers.set(e.pointerId, { x: px, y: py });
 
       if (activePointers.size >= 2) {
-        // pinch zoom + pan
         const dist = getPinchDist();
         if (pinchStartDist > 0) {
           const ratio = dist / pinchStartDist;
@@ -657,7 +611,6 @@
           newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
           const center = getPinchCenter();
-          // markazni viewport koordinatalariga o'girish
           const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
           const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
           view.scale = newScale;
@@ -668,76 +621,65 @@
         return;
       }
 
-      if (activePointers.size === 1) {
-        if (isDrawing) {
-          updateCursorPosition(e.clientX, e.clientY);
-          const n = screenToNorm(px, py);
-          sendCursor(n.x, n.y);
+      if (activePointers.size === 1 && isDrawing) {
+        const n = screenToNorm(px, py);
+        sendCursor(n.x, n.y);
 
-          const r = getImageRect();
-          const dxPx = (n.x - lastPointerX) * r.width * view.scale;
-          const dyPx = (n.y - lastPointerY) * r.height * view.scale;
-          if (dxPx * dxPx + dyPx * dyPx < 4) return;
+        const r = getImageRect();
+        const dxPx = (n.x - lastPointerX) * r.width * view.scale;
+        const dyPx = (n.y - lastPointerY) * r.height * view.scale;
+        if (dxPx * dxPx + dyPx * dyPx < 4) return;
 
-          // lokal chizish
-          const a = normToScreen(lastPointerX, lastPointerY);
-          const b = normToScreen(n.x, n.y);
-          ctx.strokeStyle = currentColor;
-          ctx.lineWidth = lineWidth * view.scale;
-          ctx.lineJoin = "round";
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
+        const a = normToScreen(lastPointerX, lastPointerY);
+        const b = normToScreen(n.x, n.y);
+        ctx.strokeStyle = currentColor;
+        ctx.lineWidth = lineWidth * view.scale;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
 
-          // serverga yuborish
-          const segRef = push(strokesRoot);
-          const id = segRef.key;
-          const payload = {
-            x0: +lastSentX.toFixed(4),
-            y0: +lastSentY.toFixed(4),
-            x1: +n.x.toFixed(4),
-            y1: +n.y.toFixed(4),
-            c: currentColor,
-            w: lineWidth,
-            u: myId,
-            t: Date.now()
-          };
-          localSegments.set(id, payload);
-          myStrokeIds.push(id);
-          addToUndoBatch(id);
-          rtdbSet(segRef, payload).catch((err) => {
-            console.error("push failed", err);
-          });
+        const segRef = push(strokesRoot);
+        const id = segRef.key;
+        const payload = {
+          x0: +lastSentX.toFixed(4),
+          y0: +lastSentY.toFixed(4),
+          x1: +n.x.toFixed(4),
+          y1: +n.y.toFixed(4),
+          c: currentColor,
+          w: lineWidth,
+          u: myId,
+          t: Date.now()
+        };
+        localSegments.set(id, payload);
+        myStrokeIds.push(id);
+        addToUndoBatch(id);
+        rtdbSet(segRef, payload).catch((err) => {
+          console.error("push failed", err);
+        });
 
-          lastPointerX = n.x;
-          lastPointerY = n.y;
-          lastSentX = n.x;
-          lastSentY = n.y;
-        }
+        lastPointerX = n.x;
+        lastPointerY = n.y;
+        lastSentX = n.x;
+        lastSentY = n.y;
       }
     }
 
     function onPointerUp(e) {
-      const wasSize = activePointers.size;
       activePointers.delete(e.pointerId);
       try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
 
       if (activePointers.size === 0) {
         isDrawing = false;
-        isPanning = false;
         pinchStartDist = 0;
       } else if (activePointers.size === 1) {
-        // ikki barmoqdan bittasi qoldi — pinch tugadi, chizishni davom ettirmaymiz
         isDrawing = false;
-        isPanning = false;
         pinchStartDist = 0;
       }
-      cursorPreview.classList.remove("active");
     }
 
-    // ---- wheel zoom ----
     function onWheel(e) {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
@@ -747,7 +689,6 @@
       zoomAt(px, py, view.scale * factor);
     }
 
-    // ---- tugmalar ----
     document.getElementById("zoomIn").addEventListener("click", () => {
       const rect = canvas.getBoundingClientRect();
       zoomAt(rect.width / 2, rect.height / 2, view.scale * 1.25);
@@ -817,7 +758,6 @@
       }
     });
 
-    // ---- Realtime sync ----
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
@@ -956,15 +896,8 @@
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
-    canvas.addEventListener("pointerleave", (e) => {
-      if (activePointers.size === 0) {
-        cursorPreview.classList.remove("active");
-      }
-    });
-    canvas.addEventListener("pointerenter", () => cursorPreview.classList.add("active"));
     canvas.addEventListener("wheel", onWheel, { passive: false });
 
-    // gesture (Safari iOS uchun pinch)
     ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
       document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
     });
@@ -973,7 +906,10 @@
       redrawAll();
       for (const [uid, c] of remoteCursors) {
         const p = normToScreen(c.nx, c.ny);
+        c.el.style.transition = "none";
         c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+        void c.el.offsetWidth;
+        c.el.style.transition = "";
       }
     });
 
