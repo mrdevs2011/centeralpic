@@ -71,7 +71,7 @@
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
     import {
       getDatabase, ref, set as rtdbSet, update as rtdbUpdate,
-      onValue, onChildAdded, onDisconnect, query, limitToLast, get
+      onValue, onChildAdded, onChildRemoved, onDisconnect, query, limitToLast, get
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
     // ============================================================
@@ -88,6 +88,7 @@
     };
 
     const ROOM = "centeralpic-main";
+    const MAX_FILE_BYTES = 700 * 1024; // base64 ~ 956KB < Firestore 1MB limit
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
@@ -105,7 +106,7 @@
     const fileInput = document.getElementById("fileInput");
 
     // ============================================================
-    // IDENTITY — saqlanadi, refresh'da o'zgarmaydi
+    // IDENTITY
     // ============================================================
     let myId = localStorage.getItem("cp_id");
     if (!myId) {
@@ -113,7 +114,6 @@
       localStorage.setItem("cp_id", myId);
     }
 
-    // Har brauzer uchun bir marta rang — o'zgarmas
     let myColor = localStorage.getItem("cp_color");
     if (!myColor) {
       const h = Math.floor(Math.random() * 360);
@@ -138,13 +138,15 @@
     let imageMeta = null;
 
     // ============================================================
-    // VIEW — nisbiy (ekran o'lchamidan mustaqil)
-    // scale: rasm natural o'lchamiga nisbatan (1 = 1:1 piksel)
+    // VIEW — to'liq nisbiy
+    // rs: rasm "ekranga sig'ish" (fit) masshtabiga nisbatan (1 = ekranga sig'adi)
     // cx, cy: rasm markazining ekrandagi joyi (0..1)
+    // Shu sababli telefon va kompyuterda bir xil ko'rinadi.
     // ============================================================
-    const view = { scale: 1, cx: 0.5, cy: 0.5, initialized: false };
-    const MIN_SCALE = 0.05, MAX_SCALE = 32;
+    const view = { rs: 0.95, cx: 0.5, cy: 0.5, initialized: false };
+    const MIN_RS = 0.05, MAX_RS = 60;
     let viewWriteTimer = null;
+    let lastViewActivity = 0; // oxirgi jonli view yangilanishi (mahalliy vaqt)
 
     let isSpaceDown = false;
     let isPanning = false;
@@ -159,7 +161,7 @@
 
     const activePointers = new Map();
     let isDrawing = false;
-    let pinchStartDist = 0, pinchStartScale = 1;
+    let pinchStartDist = 0, pinchStartRs = 1;
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartCx = 0.5, pinchStartCy = 0.5;
 
@@ -194,7 +196,7 @@
     function createPeer(remoteId, initiator) {
       if (peers.has(remoteId)) return peers.get(remoteId);
       const pc = new RTCPeerConnection(ICE);
-      const entry = { pc, dc: null, connected: false, created: Date.now() };
+      const entry = { pc, dc: null, connected: false, created: Date.now(), pend: [] };
       peers.set(remoteId, entry);
 
       pc.onicecandidate = (e) => {
@@ -209,7 +211,7 @@
       pc.ondatachannel = (e) => setupDataChannel(remoteId, e.channel);
 
       if (initiator) {
-        const dc = pc.createDataChannel("d", { ordered: false, maxRetransmits: 0 });
+        const dc = pc.createDataChannel("d"); // ordered + reliable
         setupDataChannel(remoteId, dc);
         pc.createOffer()
           .then((offer) => pc.setLocalDescription(offer))
@@ -243,6 +245,14 @@
       rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}`), null).catch(() => {});
     }
 
+    async function flushPendingIce(entry) {
+      const list = entry.pend || [];
+      entry.pend = [];
+      for (const c of list) {
+        try { await entry.pc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {}
+      }
+    }
+
     async function handleRemoteSdp(fromId, sdp) {
       const key = fromId + ":" + sdp.type + ":" + (sdp.sdp || "").slice(0, 40);
       if (handledSdp.has(key)) return;
@@ -253,6 +263,7 @@
       try {
         if (sdp.type === "offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          await flushPendingIce(entry);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           const path = `signaling/${ROOM}/${fromId}/sdp/${myId}`;
@@ -260,6 +271,7 @@
         } else if (sdp.type === "answer") {
           if (pc.signalingState === "have-local-offer") {
             await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            await flushPendingIce(entry);
           }
         }
       } catch (err) {}
@@ -271,6 +283,8 @@
       handledIce.add(key);
       let entry = peers.get(fromId);
       if (!entry) entry = createPeer(fromId, false);
+      // remoteDescription hali yo'q bo'lsa — navbatga qo'yamiz
+      if (!entry.pc.remoteDescription) { entry.pend.push(cand); return; }
       try { await entry.pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (err) {}
     }
 
@@ -309,7 +323,7 @@
     }, 5000);
 
     // ============================================================
-    // SEND — 3 transportga bir vaqtda
+    // SEND — BroadcastChannel + WebRTC
     // ============================================================
     function send(msg) {
       msg.from = myId;
@@ -333,7 +347,6 @@
           if (!s || localSegments.has(s.id)) return;
           localSegments.set(s.id, s);
           drawSegmentNorm(s);
-          scheduleStrokePersist(s);
           break;
         }
         case "u": {
@@ -349,12 +362,14 @@
           break;
         }
         case "v": {
+          if (typeof msg.rs !== "number") return;
+          lastViewActivity = Date.now();
           if (
-            Math.abs(msg.scale - view.scale) < 0.0001 &&
-            Math.abs(msg.cx - view.cx) < 0.0001 &&
-            Math.abs(msg.cy - view.cy) < 0.0001
+            Math.abs(msg.rs - view.rs) < 0.00001 &&
+            Math.abs(msg.cx - view.cx) < 0.00001 &&
+            Math.abs(msg.cy - view.cy) < 0.00001
           ) return;
-          view.scale = msg.scale;
+          view.rs = msg.rs;
           view.cx = msg.cx;
           view.cy = msg.cy;
           view.initialized = true;
@@ -368,13 +383,15 @@
       }
     }
 
-    // Stroke persistence (RTDB)
+    // ============================================================
+    // STROKE PERSISTENCE (RTDB) — chizuvchining o'zi yozadi
+    // ============================================================
     let strokePersistQueue = [];
     let strokePersistTimer = null;
     function scheduleStrokePersist(s) {
       strokePersistQueue.push(s);
       if (strokePersistTimer) return;
-      strokePersistTimer = setTimeout(flushStrokePersist, 200);
+      strokePersistTimer = setTimeout(flushStrokePersist, 120);
     }
     async function flushStrokePersist() {
       strokePersistTimer = null;
@@ -384,6 +401,18 @@
       for (const s of batch) updates["strokes/" + s.id] = s;
       try { await rtdbUpdate(ref(rtdb), updates); } catch (e) {}
     }
+
+    // RTDB'dan: sahifa ochilganda mavjud chiziqlar + kafolatli sinxron
+    onChildAdded(strokesRoot, (snap) => {
+      const s = snap.val();
+      if (!s || !s.id) return;
+      if (localSegments.has(snap.key)) return;
+      localSegments.set(snap.key, s);
+      drawSegmentNorm(s);
+    });
+    onChildRemoved(strokesRoot, (snap) => {
+      if (localSegments.delete(snap.key)) redrawAll();
+    });
 
     // ============================================================
     // GEOMETRY — nisbiy view
@@ -395,12 +424,21 @@
       };
     }
 
+    function fitScale() {
+      const { w, h } = getImageNatural();
+      return Math.min(canvasW / w, canvasH / h) || 1;
+    }
+
+    // Haqiqiy (absolyut) masshtab
+    function S() { return view.rs * fitScale(); }
+
     function getImageScreenRect() {
       const { w: nW, h: nH } = getImageNatural();
+      const s = S();
       const cxp = view.cx * canvasW;
       const cyp = view.cy * canvasH;
-      const w = nW * view.scale;
-      const h = nH * view.scale;
+      const w = nW * s;
+      const h = nH * s;
       return { left: cxp - w / 2, top: cyp - h / 2, width: w, height: h };
     }
 
@@ -435,12 +473,12 @@
     // VIEW PERSISTENCE — Firestore
     // ============================================================
     function queueViewWrite() {
-      if (viewWriteTimer) return;
+      if (viewWriteTimer) clearTimeout(viewWriteTimer);
       viewWriteTimer = setTimeout(async () => {
         viewWriteTimer = null;
         try {
           await setDoc(viewRef, {
-            scale: +view.scale.toFixed(6),
+            rs: +view.rs.toFixed(6),
             cx: +view.cx.toFixed(6),
             cy: +view.cy.toFixed(6),
             t: Date.now(),
@@ -455,8 +493,8 @@
         const snap = await getDoc(viewRef);
         if (!snap.exists()) return false;
         const v = snap.data();
-        if (typeof v.scale !== "number") return false;
-        view.scale = v.scale;
+        if (typeof v.rs !== "number") return false;
+        view.rs = v.rs;
         view.cx = v.cx ?? 0.5;
         view.cy = v.cy ?? 0.5;
         view.initialized = true;
@@ -465,9 +503,10 @@
     }
 
     function broadcastView() {
+      lastViewActivity = Date.now();
       send({
         t: "v",
-        scale: +view.scale.toFixed(6),
+        rs: +view.rs.toFixed(6),
         cx: +view.cx.toFixed(6),
         cy: +view.cy.toFixed(6)
       });
@@ -477,20 +516,23 @@
     // ============================================================
     // VIEW OPERATIONS
     // ============================================================
-    function zoomAt(px, py, newScale, sync = true) {
-      newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+    function clampRs(v) { return Math.max(MIN_RS, Math.min(MAX_RS, v)); }
+
+    function zoomAt(px, py, newRs, sync = true) {
+      newRs = clampRs(newRs);
       const r = getImageScreenRect();
       const nx = (px - r.left) / r.width;
       const ny = (py - r.top) / r.height;
 
       const { w: nW, h: nH } = getImageNatural();
-      const newW = nW * newScale;
-      const newH = nH * newScale;
+      const newS = newRs * fitScale();
+      const newW = nW * newS;
+      const newH = nH * newS;
 
       const newLeft = px - nx * newW;
       const newTop = py - ny * newH;
 
-      view.scale = newScale;
+      view.rs = newRs;
       view.cx = (newLeft + newW / 2) / canvasW;
       view.cy = (newTop + newH / 2) / canvasH;
       view.initialized = true;
@@ -500,9 +542,7 @@
     }
 
     function resetView(sync = true) {
-      const { w: nW, h: nH } = getImageNatural();
-      const fitScale = Math.min(canvasW / nW, canvasH / nH) * 0.95;
-      view.scale = fitScale;
+      view.rs = 0.95;
       view.cx = 0.5;
       view.cy = 0.5;
       view.initialized = true;
@@ -518,7 +558,7 @@
     }
 
     // ============================================================
-    // CURSOR — to'ldirilgan uchburchak, uchi (0,0)
+    // CURSOR
     // ============================================================
     const CURSOR_SVG_NS = "http://www.w3.org/2000/svg";
     const CURSOR_PATH_D = "M 0 0 L 260 180 L 120 210 L 0 330 Z";
@@ -600,7 +640,7 @@
       const a = normToScreen(s.x0, s.y0);
       const b = normToScreen(s.x1, s.y1);
       ctx.strokeStyle = s.c;
-      ctx.lineWidth = s.w * view.scale;
+      ctx.lineWidth = s.w * S();
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
@@ -656,17 +696,20 @@
       showImage(data.base64);
     }, (err) => {});
 
-    // View Firestore'dan — refresh bo'lsa ham bir xil
+    // View Firestore'dan — faqat jonli yangilanish bo'lmagan paytda
+    // (eski holat yangisini orqaga tortib "sakrash" qilmasligi uchun)
     onSnapshot(viewRef, { includeMetadataChanges: false }, (snap) => {
       if (!snap.exists()) return;
       const v = snap.data();
-      if (typeof v.scale !== "number") return;
+      if (typeof v.rs !== "number") return;
+      if (activePointers.size > 0 || isPanning) return;
+      if (Date.now() - lastViewActivity < 2000) return;
       if (
-        Math.abs(v.scale - view.scale) < 0.0001 &&
-        Math.abs(v.cx - view.cx) < 0.0001 &&
-        Math.abs(v.cy - view.cy) < 0.0001
+        Math.abs(v.rs - view.rs) < 0.00001 &&
+        Math.abs(v.cx - view.cx) < 0.00001 &&
+        Math.abs(v.cy - view.cy) < 0.00001
       ) return;
-      view.scale = v.scale;
+      view.rs = v.rs;
       view.cx = v.cx ?? 0.5;
       view.cy = v.cy ?? 0.5;
       view.initialized = true;
@@ -709,7 +752,7 @@
       } else if (activePointers.size === 2) {
         isDrawing = false; isPanning = true;
         pinchStartDist = getPinchDist();
-        pinchStartScale = view.scale;
+        pinchStartRs = view.rs;
         pinchStartCenter = getPinchCenter();
         pinchStartCx = view.cx;
         pinchStartCy = view.cy;
@@ -743,23 +786,25 @@
         const dist = getPinchDist();
         if (pinchStartDist > 0) {
           const ratio = dist / pinchStartDist;
-          let newScale = pinchStartScale * ratio;
-          newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+          const newRs = clampRs(pinchStartRs * ratio);
 
           const { w: nW, h: nH } = getImageNatural();
+          const fit = fitScale();
+          const startS = pinchStartRs * fit;
+          const newS = newRs * fit;
           const center = getPinchCenter();
 
-          const startLeft = pinchStartCx * canvasW - (nW * pinchStartScale) / 2;
-          const startTop = pinchStartCy * canvasH - (nH * pinchStartScale) / 2;
-          const nx = (pinchStartCenter.x - startLeft) / (nW * pinchStartScale);
-          const ny = (pinchStartCenter.y - startTop) / (nH * pinchStartScale);
+          const startLeft = pinchStartCx * canvasW - (nW * startS) / 2;
+          const startTop = pinchStartCy * canvasH - (nH * startS) / 2;
+          const nx = (pinchStartCenter.x - startLeft) / (nW * startS);
+          const ny = (pinchStartCenter.y - startTop) / (nH * startS);
 
-          const newLeft = center.x - nx * nW * newScale;
-          const newTop = center.y - ny * nH * newScale;
+          const newLeft = center.x - nx * nW * newS;
+          const newTop = center.y - ny * nH * newS;
 
-          view.scale = newScale;
-          view.cx = (newLeft + (nW * newScale) / 2) / canvasW;
-          view.cy = (newTop + (nH * newScale) / 2) / canvasH;
+          view.rs = newRs;
+          view.cx = (newLeft + (nW * newS) / 2) / canvasW;
+          view.cy = (newTop + (nH * newS) / 2) / canvasH;
           view.initialized = true;
           applyView();
           broadcastView();
@@ -779,7 +824,7 @@
         const a = normToScreen(lastPointerX, lastPointerY);
         const b = normToScreen(n.x, n.y);
         ctx.strokeStyle = currentColor;
-        ctx.lineWidth = currentWidth() * view.scale;
+        ctx.lineWidth = currentWidth() * S();
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         ctx.beginPath();
@@ -801,6 +846,7 @@
         };
         localSegments.set(id, s);
         send({ t: "s", s });
+        scheduleStrokePersist(s); // chizuvchining o'zi RTDB'ga yozadi
 
         lastPointerX = n.x; lastPointerY = n.y;
         lastSentX = n.x; lastSentY = n.y;
@@ -810,10 +856,7 @@
     function onPointerUp(e) {
       activePointers.delete(e.pointerId);
       try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-      if (activePointers.size === 0) {
-        isDrawing = false; isPanning = false;
-        pinchStartDist = 0;
-      } else if (activePointers.size === 1) {
+      if (activePointers.size <= 1) {
         isDrawing = false; isPanning = false;
         pinchStartDist = 0;
       }
@@ -826,7 +869,7 @@
       const py = e.clientY - rect.top;
       if (e.ctrlKey) {
         const factor = Math.exp(-e.deltaY * 0.01);
-        zoomAt(px, py, view.scale * factor);
+        zoomAt(px, py, view.rs * factor);
       } else {
         panBy(-e.deltaX, -e.deltaY);
       }
@@ -840,11 +883,15 @@
       if (undoLock) return;
       undoLock = true;
       try {
+        // Hali yozilmagan chiziqlarni avval RTDB'ga o'tkazamiz
+        if (strokePersistTimer) { clearTimeout(strokePersistTimer); }
+        await flushStrokePersist();
+
         const q = query(strokesRoot, limitToLast(2000));
         const snap = await get(q);
         if (!snap.exists()) { undoLock = false; return; }
         const arr = [];
-        snap.forEach((child) => arr.push({ id: child.key, ...child.val() }));
+        snap.forEach((child) => { arr.push({ id: child.key, ...child.val() }); });
         if (!arr.length) { undoLock = false; return; }
 
         const last = arr[arr.length - 1];
@@ -873,6 +920,8 @@
     // CLEAR
     // ============================================================
     function clearStrokes() {
+      strokePersistQueue = [];
+      if (strokePersistTimer) { clearTimeout(strokePersistTimer); strokePersistTimer = null; }
       localSegments.clear();
       redrawAll();
       send({ t: "c" });
@@ -888,8 +937,6 @@
     // ============================================================
     // HELPERS
     // ============================================================
-    function setLoader(on) {}
-
     function fileToBase64(file) {
       return new Promise((res, rej) => {
         const r = new FileReader();
@@ -904,8 +951,9 @@
     // ============================================================
     async function uploadOne(file) {
       if (!file || !file.type || !file.type.startsWith("image/")) return;
-      if (file.size > 800 * 1024) return;
+      if (file.size > MAX_FILE_BYTES) return;
       const token = ++localToken;
+      const prevSrc = currentSrc;
       try {
         const base64 = await fileToBase64(file);
         showImage(base64);
@@ -922,6 +970,8 @@
         resetView(true);
       } catch (err) {
         console.error(err);
+        // Yozilmadi — boshqalar bilan bir xil holatga qaytamiz
+        if (token === localToken && prevSrc) showImage(prevSrc);
       }
     }
 
@@ -1008,10 +1058,10 @@
       }
       if (cmd && k === "0") { e.preventDefault(); resetView(true); return; }
       if (cmd && (k === "+" || k === "=")) {
-        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25); return;
+        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.rs * 1.25); return;
       }
       if (cmd && (k === "-" || k === "_")) {
-        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25); return;
+        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.rs / 1.25); return;
       }
       if (k === "Delete") {
         e.preventDefault();
@@ -1043,7 +1093,7 @@
         return;
       }
       if (k === "1") { e.preventDefault(); resetView(true); return; }
-      if (k === "2") { e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, 2); return; }
+      if (k === "2") { e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, 1 / fitScale()); return; } // 1:1 piksel
 
       const panStep = e.shiftKey ? 100 : 30;
       if (k === "ArrowLeft") { e.preventDefault(); panBy(panStep, 0); return; }
@@ -1070,7 +1120,6 @@
     // ============================================================
     resizeCanvas();
 
-    // View'ni Firestore'dan yuklash (rasm yuklanishidan oldin)
     (async () => {
       await loadViewFromFirestore();
       if (view.initialized) applyView();
