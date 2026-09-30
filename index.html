@@ -197,6 +197,14 @@ onChildAdded(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
   if (otherId !== myId) createPeer(otherId, myId < otherId);
 });
 
+onChildRemoved(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
+  const id = child.key;
+  if (id === myId) return;
+  cleanupPeer(id);
+  const c = remoteCursors.get(id);
+  if (c) { c.el.remove(); remoteCursors.delete(id); }
+});
+
 rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: Date.now() }).catch(() => {});
 onDisconnect(ref(rtdb, `signaling/${ROOM}/peers/${myId}`)).remove();
 onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
@@ -702,7 +710,11 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 });
 window.addEventListener("resize", resizeCanvas);
-window.addEventListener("beforeunload", () => { if (bc) bc.close(); });
+window.addEventListener("pagehide", () => {
+  rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), null).catch(() => {});
+  rtdbSet(ref(rtdb, `signaling/${ROOM}/${myId}`), null).catch(() => {});
+  if (bc) bc.close();
+});
 
 document.addEventListener("keydown", (e) => {
   const t = document.activeElement && document.activeElement.tagName;
