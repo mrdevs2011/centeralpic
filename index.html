@@ -56,6 +56,7 @@ const MAX_FILE_BYTES = 800 * 1024;
 const app = initializeApp(firebaseConfig);
 const rtdb = getDatabase(app);
 const imageRef = ref(rtdb, "image");
+const viewRef = ref(rtdb, "view");
 const strokesRoot = ref(rtdb, "strokes");
 
 /* Ekran o'lchami hamma ishtirokchida bir xil bo'lishi shart */
@@ -114,6 +115,7 @@ if (bc) bc.onmessage = (e) => {
 };
 
 const peers = new Map();
+const knownPeers = new Set(), retries = new Map();
 const handledSdp = new Set(), handledIce = new Set();
 const ICE = { iceCandidatePoolSize: 4, iceServers: [
   { urls: "stun:stun.l.google.com:19302" },
@@ -133,7 +135,8 @@ function createPeer(remoteId, initiator) {
     }
   };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "failed" || pc.connectionState === "closed") cleanupPeer(remoteId);
+    const st = pc.connectionState;
+    if (st === "failed" || st === "closed") { cleanupPeer(remoteId); if (st === "failed") retryPeer(remoteId); }
   };
   pc.ondatachannel = (e) => setupDataChannel(remoteId, e.channel);
   if (initiator) {
@@ -152,7 +155,7 @@ function setupDataChannel(remoteId, dc) {
   const entry = peers.get(remoteId);
   if (!entry) return;
   if (dc.label === "f") entry.fc = dc; else entry.dc = dc;
-  dc.onopen = () => { entry.connected = true; };
+  dc.onopen = () => { entry.connected = true; retries.delete(remoteId); };
   dc.onclose = () => { if (dc.label !== "f") entry.connected = false; };
   dc.onmessage = (e) => { try { handleMessage(remoteId, JSON.parse(e.data)); } catch (err) {} };
 }
@@ -164,6 +167,13 @@ function cleanupPeer(remoteId) {
   try { entry.pc.close(); } catch (e) {}
   peers.delete(remoteId);
   rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}`), null).catch(() => {});
+}
+
+function retryPeer(id) {
+  const n = (retries.get(id) || 0) + 1;
+  retries.set(id, n);
+  if (n > 3) return;
+  setTimeout(() => { if (knownPeers.has(id) && !peers.has(id)) createPeer(id, myId < id); }, 1500);
 }
 
 async function flushPendingIce(entry) {
@@ -218,12 +228,15 @@ onValue(ref(rtdb, `signaling/${ROOM}/${myId}`), (snap) => {
 
 onChildAdded(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
   const otherId = child.key;
-  if (otherId !== myId) createPeer(otherId, myId < otherId);
+  if (otherId === myId) return;
+  knownPeers.add(otherId);
+  createPeer(otherId, myId < otherId);
 });
 
 onChildRemoved(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
   const id = child.key;
   if (id === myId) return;
+  knownPeers.delete(id); retries.delete(id);
   cleanupPeer(id);
   const c = remoteCursors.get(id);
   if (c) { c.el.remove(); remoteCursors.delete(id); }
@@ -238,7 +251,7 @@ onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
 
 setInterval(() => {
   const now = Date.now();
-  for (const [id, e] of peers) if (!e.connected && now - e.created > 20000) cleanupPeer(id);
+  for (const [id, e] of peers) if (!e.connected && now - e.created > 20000) { cleanupPeer(id); retryPeer(id); }
 }, 5000);
 
 /* RTDB strokes: sahifa ochilganda mavjudlarini yuklaydi + kafolatli sinxron */
@@ -281,9 +294,8 @@ function handleMessage(fromId, msg) {
       localSegments.clear(); redrawAll();
       break;
     case "v":
-      if (Math.abs(msg.scale - view.scale) < 0.0005 && Math.abs(msg.tx - view.tx) < 0.5 && Math.abs(msg.ty - view.ty) < 0.5) return;
-      view.scale = msg.scale; view.tx = msg.tx; view.ty = msg.ty;
-      applyView();
+      lastLiveView = Date.now();
+      applyRemoteView(msg);
       break;
     case "p": placeRemoteCursor(fromId, msg.x, msg.y); break;
     case "st": applyRemoteState(msg); break;
@@ -333,9 +345,31 @@ function applyView() {
     c.el.style.transition = "";
   }
 }
-function sendView() {
-  send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
+let lastLiveView = 0, viewWriteTimer = null;
+function viewPayload() {
+  return { scale: +view.scale.toFixed(5), nx: +(view.tx / canvasW).toFixed(5), ny: +(view.ty / canvasH).toFixed(5) };
 }
+function sendView() {
+  send({ t: "v", ...viewPayload() });
+  if (viewWriteTimer) return;
+  viewWriteTimer = setTimeout(() => {
+    viewWriteTimer = null;
+    rtdbSet(viewRef, { ...viewPayload(), u: myId, t: Date.now() }).catch(() => {});
+  }, 100);
+}
+function applyRemoteView(v) {
+  if (typeof v.nx !== "number" || typeof v.scale !== "number") return;
+  const tx = v.nx * canvasW, ty = v.ny * canvasH;
+  if (Math.abs(v.scale - view.scale) < 0.0005 && Math.abs(tx - view.tx) < 0.5 && Math.abs(ty - view.ty) < 0.5) return;
+  view.scale = v.scale; view.tx = tx; view.ty = ty;
+  applyView();
+}
+onValue(viewRef, (snap) => {
+  const v = snap.val();
+  if (!v || v.u === myId) return;
+  if (activePointers.size > 0 || isPanning || Date.now() - lastLiveView < 1500) return;
+  applyRemoteView(v);
+});
 function zoomAt(px, py, newScale, sync = true) {
   newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
   const cx = (px - view.tx) / view.scale, cy = (py - view.ty) / view.scale;
