@@ -22,6 +22,7 @@
       align-items: center;
       justify-content: center;
       background: #0a0a0a;
+      overflow: hidden;
     }
     .zone.dragover { background: #141414; }
     .zone.dragover::after {
@@ -154,6 +155,40 @@
       display: none;
     }
     .cursor-preview.active { display: block; }
+
+    /* boshqa foydalanuvchilarning kursorlari */
+    .remote-cursor {
+      position: absolute;
+      pointer-events: none;
+      z-index: 25;
+      transition: transform 60ms linear, opacity 200ms ease;
+      opacity: 0;
+      will-change: transform;
+    }
+    .remote-cursor.visible { opacity: 1; }
+    .remote-cursor .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 2px rgba(0,0,0,0.55), 0 0 12px currentColor;
+      transform: translate(-50%, -50%);
+      background: currentColor;
+    }
+    .remote-cursor .label {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      white-space: nowrap;
+      font-family: ui-monospace, monospace;
+      letter-spacing: 0.02em;
+      border: 1px solid currentColor;
+    }
   </style>
 </head>
 <body>
@@ -183,10 +218,13 @@
       remove,
       onChildAdded,
       onChildRemoved,
+      onValue,
+      onDisconnect,
       query,
       limitToLast,
       get,
-      set as rtdbSet
+      set as rtdbSet,
+      update as rtdbUpdate
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
     const firebaseConfig = {
@@ -204,6 +242,7 @@
     const rtdb = getDatabase(app);
     const imageRef = doc(db, "app", "mainImage");
     const strokesRoot = ref(rtdb, "strokes");
+    const cursorsRoot = ref(rtdb, "cursors");
 
     const zone = document.getElementById("zone");
     const preview = document.getElementById("preview");
@@ -220,17 +259,30 @@
     const currentColor = "#ff0000";
 
     // ----- pointer holati -----
-    let lastSentX = 0;       // oxirgi YUBORILGAN nuqta
+    let lastSentX = 0;
     let lastSentY = 0;
-    let lastPointerX = 0;    // oxirgi pointer pozitsiyasi
+    let lastPointerX = 0;
     let lastPointerY = 0;
 
     // ----- stroke state -----
     const myId = Math.random().toString(36).slice(2, 10);
-    const localSegments = new Map();   // id -> segment
-    const myStrokeIds = [];            // mening chizganlarim
-    const undoStack = [];              // batch'lar
+    const localSegments = new Map();
+    const myStrokeIds = [];
+    const undoStack = [];
     const MAX_UNDO = 100;
+
+    // ----- cursor sync -----
+    const myCursorRef = ref(rtdb, "cursors/" + myId);
+    const remoteCursors = new Map(); // uid -> {el, dotEl, labelEl, x, y, t, color}
+    let lastCursorSend = 0;
+    const CURSOR_SEND_INTERVAL = 40; // ms
+
+    function pickColor(seed) {
+      // barqaror rang uid asosida
+      let h = 0;
+      for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+      return `hsl(${h}, 85%, 60%)`;
+    }
 
     function showStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -310,6 +362,90 @@
       for (const s of localSegments.values()) drawSegment(s);
     }
 
+    // ----- kursorini serverga yuborish (throttled) -----
+    function sendCursor(x, y) {
+      const now = performance.now();
+      if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
+      lastCursorSend = now;
+      rtdbUpdate(myCursorRef, {
+        x: Math.round(x),
+        y: Math.round(y),
+        t: Date.now()
+      }).catch(() => {});
+    }
+
+    // ----- kursorini ekranda boshqarish (remote) -----
+    function ensureRemoteCursor(uid) {
+      let c = remoteCursors.get(uid);
+      if (c) return c;
+      const color = pickColor(uid);
+      const el = document.createElement("div");
+      el.className = "remote-cursor";
+      el.style.color = color;
+
+      const dot = document.createElement("div");
+      dot.className = "dot";
+      dot.style.color = color;
+      dot.style.background = color;
+      el.appendChild(dot);
+
+      const label = document.createElement("div");
+      label.className = "label";
+      label.style.color = color;
+      label.textContent = uid;
+      el.appendChild(label);
+
+      zone.appendChild(el);
+      c = { el, dotEl: dot, labelEl: label, x: 0, y: 0, t: 0 };
+      remoteCursors.set(uid, c);
+      return c;
+    }
+
+    function updateRemoteCursor(uid, x, y, t) {
+      const c = ensureRemoteCursor(uid);
+      c.x = x; c.y = y; c.t = t;
+      c.el.style.transform = `translate(${x}px, ${y}px)`;
+      c.el.classList.add("visible");
+    }
+
+    function removeRemoteCursor(uid) {
+      const c = remoteCursors.get(uid);
+      if (!c) return;
+      c.el.remove();
+      remoteCursors.delete(uid);
+    }
+
+    // ----- kursorlarni kuzatish -----
+    onValue(cursorsRoot, (snap) => {
+      const data = snap.val() || {};
+      const now = Date.now();
+      // yangi/yangilangan
+      for (const uid in data) {
+        if (uid === myId) continue;
+        const v = data[uid];
+        if (!v) continue;
+        updateRemoteCursor(uid, v.x | 0, v.y | 0, v.t | 0);
+      }
+      // yo'qolgan
+      for (const uid of Array.from(remoteCursors.keys())) {
+        if (!data[uid]) removeRemoteCursor(uid);
+      }
+    });
+
+    // eski kursorlarni tozalash (5s dan ortiq yangilanmagan)
+    setInterval(() => {
+      const now = Date.now();
+      for (const [uid, c] of remoteCursors) {
+        if (now - c.t > 5000) removeRemoteCursor(uid);
+      }
+    }, 2000);
+
+    // o'zi chiqib ketganda kursorni o'chirish
+    onDisconnect(myCursorRef).remove().catch(() => {});
+    window.addEventListener("beforeunload", () => {
+      try { myCursorRef && remove(myCursorRef); } catch (e) {}
+    });
+
     function startDrawing(e) {
       if (e.button !== undefined && e.button !== 0) return;
       e.preventDefault();
@@ -323,22 +459,25 @@
       lastPointerY = y;
       cursorPreview.classList.add("active");
       updateCursorPosition(e);
+      sendCursor(x, y);
     }
 
     function updateDrawing(e) {
       updateCursorPosition(e);
-      if (!isDrawing) return;
-      e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      // juda yaqin nuqtalarni tashlab yuborish (trafikni kamaytiradi)
+      // kursor har doim yuboriladi (chizmasa ham)
+      sendCursor(x, y);
+
+      if (!isDrawing) return;
+      e.preventDefault();
+
       const dx = x - lastPointerX;
       const dy = y - lastPointerY;
       if (dx * dx + dy * dy < 4) return;
 
-      // 1) lokal chizish — pointer harakatiga to'liq silliq
       ctx.strokeStyle = currentColor;
       ctx.lineWidth = lineWidth;
       ctx.lineJoin = "round";
@@ -351,8 +490,6 @@
       lastPointerX = x;
       lastPointerY = y;
 
-      // 2) serverga yuborish — oldingi YUBORILGAN nuqtadan hozirgi pointergacha.
-      //    Segmentlar doim tutash bo'ladi.
       const segRef = push(strokesRoot);
       const id = segRef.key;
       const payload = {
@@ -372,7 +509,6 @@
         console.error("push failed", err);
       });
 
-      // 3) keyingi segment shu nuqtadan boshlanadi
       lastSentX = x;
       lastSentY = y;
     }
@@ -429,7 +565,7 @@
       }
     });
 
-    // ----- Realtime sync -----
+    // ----- Realtime sync: strokes -----
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
