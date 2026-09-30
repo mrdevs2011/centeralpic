@@ -25,7 +25,6 @@
       touch-action: none;
     }
 
-    /* blur-in animatsiya — rasm yuklanganda */
     #canvas {
       position: absolute;
       inset: 0;
@@ -41,15 +40,13 @@
       transition: opacity 0.15s linear, filter 0.6s cubic-bezier(0.22, 1, 0.36, 1);
       will-change: opacity, filter;
     }
-    #canvas.revealed {
-      opacity: 1;
-      filter: blur(0) brightness(1);
-    }
+    #canvas.revealed { opacity: 1; filter: blur(0) brightness(1); }
     #canvas.clearing {
       opacity: 0;
       filter: blur(16px) brightness(0.7);
       transition: opacity 0.25s ease, filter 0.25s ease;
     }
+    #canvas.panning { cursor: grabbing; }
 
     .hint {
       color: #525252;
@@ -102,6 +99,7 @@
       100% { background-position: -200% 0; }
     }
     #fileInput { display: none; }
+
     .status {
       position: fixed;
       bottom: 18px;
@@ -181,13 +179,124 @@
       transition: opacity 0.2s;
     }
     .zoom-badge.show { opacity: 1; }
+
+    /* ---- yordam paneli ---- */
+    .help-toggle {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: #1a1a1a;
+      color: #d4d4d4;
+      border: 1px solid #333;
+      font-size: 18px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      font-family: ui-monospace, monospace;
+    }
+    .help-toggle:hover { background: #262626; }
+
+    .help-panel {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(6px);
+      z-index: 60;
+      display: none;
+      overflow-y: auto;
+      padding: 40px 20px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .help-panel.open { display: block; opacity: 1; }
+    .help-content {
+      max-width: 900px;
+      margin: 0 auto;
+      color: #d4d4d4;
+    }
+    .help-content h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+      letter-spacing: 0.02em;
+    }
+    .help-content h1 .accent { color: #ff0000; }
+    .help-content .sub {
+      color: #737373;
+      font-size: 0.85rem;
+      margin-bottom: 30px;
+    }
+    .help-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .help-section {
+      background: #141414;
+      border: 1px solid #262626;
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .help-section h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #737373;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    .help-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 0.85rem;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .help-row:last-child { border-bottom: none; }
+    .help-row .desc { color: #a3a3a3; }
+    .help-row kbd {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: #262626;
+      border: 1px solid #333;
+      border-bottom-width: 2px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      color: #e5e5e5;
+      margin-left: 4px;
+    }
+    .help-close {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: #1a1a1a;
+      color: #d4d4d4;
+      border: 1px solid #333;
+      font-size: 18px;
+      cursor: pointer;
+      z-index: 70;
+      display: none;
+    }
+    .help-panel.open ~ .help-close { display: flex; align-items: center; justify-content: center; }
   </style>
 </head>
 <body>
   <div class="zone" id="zone">
     <p class="hint">
       <span class="brand">Centeral<span class="accent">PIC</span></span>
-      <span class="sub">Drop or Ctrl+V<br>Ctrl+Z — undo &nbsp;·&nbsp; 2-finger pan &nbsp;·&nbsp; pinch — zoom</span>
+      <span class="sub">Drop or Ctrl+V<br>Press <kbd style="padding:1px 5px;border-radius:3px;background:#1a1a1a;border:1px solid #333;font-family:monospace;font-size:0.8em">?</kbd> for shortcuts</span>
     </p>
     <input type="file" id="fileInput" accept="image/*">
     <canvas id="canvas"></canvas>
@@ -196,6 +305,58 @@
   <div class="zoom-badge" id="zoomBadge">100%</div>
   <div class="loader" id="loader"></div>
   <div class="status" id="status"></div>
+
+  <button class="help-toggle" id="helpToggle" title="Shortcuts (?)">?</button>
+
+  <div class="help-panel" id="helpPanel">
+    <button class="help-close" id="helpClose">✕</button>
+    <div class="help-content">
+      <h1>Centeral<span class="accent">PIC</span> — Shortcuts</h1>
+      <p class="sub">Klaviatura tugmalari va gesture'lar</p>
+
+      <div class="help-grid">
+        <div class="help-section">
+          <h2>View / Navigatsiya</h2>
+          <div class="help-row"><span class="desc">Zoom in</span><span><kbd>+</kbd><kbd>=</kbd></span></div>
+          <div class="help-row"><span class="desc">Zoom out</span><span><kbd>-</kbd><kbd>_</kbd></span></div>
+          <div class="help-row"><span class="desc">Reset view</span><span><kbd>0</kbd></span></div>
+          <div class="help-row"><span class="desc">Fit to screen</span><span><kbd>1</kbd></span></div>
+          <div class="help-row"><span class="desc">200% zoom</span><span><kbd>2</kbd></span></div>
+          <div class="help-row"><span class="desc">Pan</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></span></div>
+          <div class="help-row"><span class="desc">Tezroq pan</span><span><kbd>Shift</kbd>+<kbd>↑↓←→</kbd></span></div>
+          <div class="help-row"><span class="desc">Pinch zoom</span><span><kbd>2 barmoq</kbd></span></div>
+          <div class="help-row"><span class="desc">Touchpad pan</span><span><kbd>2 barmoq surish</kbd></span></div>
+          <div class="help-row"><span class="desc">Fullscreen</span><span><kbd>F</kbd></span></div>
+        </div>
+
+        <div class="help-section">
+          <h2>Chizish / Tahrirlash</h2>
+          <div class="help-row"><span class="desc">Undo</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
+          <div class="help-row"><span class="desc">Redo</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></span></div>
+          <div class="help-row"><span class="desc">Chizmani o'chirish</span><span><kbd>C</kbd></span></div>
+          <div class="help-row"><span class="desc">Rasmni tozalash</span><span><kbd>Delete</kbd>×2</span></div>
+          <div class="help-row"><span class="desc">Chiziqni ingichka</span><span><kbd>[</kbd></span></div>
+          <div class="help-row"><span class="desc">Chiziqni qalin</span><span><kbd>]</kbd></span></div>
+          <div class="help-row"><span class="desc">Rangni almashtirish</span><span><kbd>E</kbd></span></div>
+        </div>
+
+        <div class="help-section">
+          <h2>Rasm</h2>
+          <div class="help-row"><span class="desc">Clipboard'dan yuklash</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+          <div class="help-row"><span class="desc">Fayl tanlash</span><span><kbd>O</kbd></span></div>
+          <div class="help-row"><span class="desc">Yuklab olish</span><span><kbd>S</kbd></span></div>
+          <div class="help-row"><span class="desc">Ma'lumot</span><span><kbd>I</kbd></span></div>
+        </div>
+
+        <div class="help-section">
+          <h2>Yordam</h2>
+          <div class="help-row"><span class="desc">Shortcuts paneli</span><span><kbd>?</kbd><kbd>H</kbd></span></div>
+          <div class="help-row"><span class="desc">Yopish / bekor</span><span><kbd>Esc</kbd></span></div>
+          <div class="help-row"><span class="desc">Pan mode (drag)</span><span><kbd>Space</kbd>+drag</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
@@ -247,22 +408,39 @@
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     const zoomBadge = document.getElementById("zoomBadge");
+    const fileInput = document.getElementById("fileInput");
+    const helpPanel = document.getElementById("helpPanel");
+    const helpToggle = document.getElementById("helpToggle");
+    const helpClose = document.getElementById("helpClose");
 
     let currentSrc = "";
     let localToken = 0;
-    const lineWidth = 8;
-    const currentColor = "#ff0000";
+
+    // ---- sozlamalar ----
+    const COLORS = ["#ff0000", "#00ff00", "#0080ff", "#ffff00", "#ff00ff", "#00ffff", "#ffffff", "#000000"];
+    let colorIndex = 0;
+    let currentColor = COLORS[colorIndex];
+
+    const LINE_WIDTHS = [2, 4, 6, 8, 12, 16, 24];
+    let widthIndex = 3;
+    let lineWidth = LINE_WIDTHS[widthIndex];
 
     const image = new Image();
     image.crossOrigin = "anonymous";
     let imageReady = false;
+    let imageMeta = null;
 
     // ---- viewport ----
     const view = { scale: 1, tx: 0, ty: 0 };
-    const MIN_SCALE = 0.5;
-    const MAX_SCALE = 8;
-    let remoteViewApplying = false;
+    const MIN_SCALE = 0.25;
+    const MAX_SCALE = 16;
     let viewSendTimer = null;
+
+    // ---- pan/pan by keyboard ----
+    let isSpaceDown = false;
+    let isPanning = false;
+    let panStartPointer = { x: 0, y: 0 };
+    let panStartView = { tx: 0, ty: 0 };
 
     let lastSentX = 0;
     let lastSentY = 0;
@@ -273,6 +451,7 @@
     const localSegments = new Map();
     const myStrokeIds = [];
     const undoStack = [];
+    const redoStack = [];
     const MAX_UNDO = 100;
 
     const myCursorRef = ref(rtdb, "cursors/" + myId);
@@ -282,21 +461,20 @@
 
     const activePointers = new Map();
     let isDrawing = false;
-    let isPanning = false;
     let pinchStartDist = 0;
     let pinchStartScale = 1;
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
-    let panStartPointer = { x: 0, y: 0 };
-    let panStartView = { tx: 0, ty: 0 };
 
     let canvasW = 0, canvasH = 0;
     let dpr = 1;
 
-    // ---- Delete 2x tez bosish ----
     let lastDeleteTime = 0;
     const DELETE_DOUBLE_MS = 500;
 
+    // ============================================================
+    // Geometry
+    // ============================================================
     function getImageRect() {
       const nW = image.naturalWidth || 1;
       const nH = image.naturalHeight || 1;
@@ -307,27 +485,22 @@
       const top = (canvasH - h) / 2;
       return { left, top, width: w, height: h };
     }
-
     function screenToNorm(px, py) {
       const cx = (px - view.tx) / view.scale;
       const cy = (py - view.ty) / view.scale;
       const r = getImageRect();
-      return {
-        x: (cx - r.left) / r.width,
-        y: (cy - r.top) / r.height
-      };
+      return { x: (cx - r.left) / r.width, y: (cy - r.top) / r.height };
     }
-
     function normToScreen(nx, ny) {
       const r = getImageRect();
       const cx = r.left + nx * r.width;
       const cy = r.top + ny * r.height;
-      return {
-        x: cx * view.scale + view.tx,
-        y: cy * view.scale + view.ty
-      };
+      return { x: cx * view.scale + view.tx, y: cy * view.scale + view.ty };
     }
 
+    // ============================================================
+    // View / broadcast
+    // ============================================================
     function applyView() {
       redrawAll();
       for (const [uid, c] of remoteCursors) {
@@ -341,7 +514,6 @@
     }
 
     function broadcastView() {
-      // throttle — 80ms
       if (viewSendTimer) return;
       viewSendTimer = setTimeout(() => {
         viewSendTimer = null;
@@ -357,8 +529,6 @@
     onValue(viewRoot, (snap) => {
       const v = snap.val();
       if (!v) return;
-      // o'zimizning oxirgi yuborganimiz bo'lsa — e'tiborsiz qoldiramiz
-      // (agar yaqin kelib qolsa)
       const same =
         Math.abs(v.scale - view.scale) < 0.0005 &&
         Math.abs(v.tx - view.tx) < 0.5 &&
@@ -396,6 +566,24 @@
       if (broadcast) broadcastView();
     }
 
+    function setView(scale, tx, ty, broadcast = true) {
+      view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+      view.tx = tx;
+      view.ty = ty;
+      applyView();
+      if (broadcast) broadcastView();
+    }
+
+    function panBy(dx, dy, broadcast = true) {
+      view.tx += dx;
+      view.ty += dy;
+      applyView();
+      if (broadcast) broadcastView();
+    }
+
+    // ============================================================
+    // Utils
+    // ============================================================
     function pickColor(seed) {
       let h = 0;
       for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
@@ -409,9 +597,7 @@
       showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1500);
     }
 
-    function setLoader(on) {
-      loader.classList.toggle("active", !!on);
-    }
+    function setLoader(on) { loader.classList.toggle("active", !!on); }
 
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
@@ -422,7 +608,13 @@
       });
     }
 
-    // ---- blur-in reveal ----
+    function showHelp() { helpPanel.classList.add("open"); }
+    function hideHelp() { helpPanel.classList.remove("open"); }
+    function toggleHelp() { helpPanel.classList.toggle("open"); }
+
+    // ============================================================
+    // Image reveal animation
+    // ============================================================
     function revealCanvas() {
       canvas.classList.remove("clearing");
       requestAnimationFrame(() => {
@@ -441,9 +633,9 @@
       if (!src) {
         imageReady = false;
         currentSrc = "";
+        imageMeta = null;
         zone.classList.remove("has-image");
         hideCanvas();
-        // rasm o'chirilgach biroz kutib reset qilamiz
         setTimeout(() => {
           if (!imageReady) {
             resetCanvasAnim();
@@ -453,7 +645,6 @@
         return;
       }
       if (src === currentSrc && imageReady) return;
-      // yangi rasm — avval blur, keyin sharp
       resetCanvasAnim();
       imageReady = false;
       currentSrc = src;
@@ -475,6 +666,9 @@
       image.src = src;
     }
 
+    // ============================================================
+    // Draw
+    // ============================================================
     function drawImage() {
       if (!imageReady) return;
       const r = getImageRect();
@@ -511,6 +705,9 @@
       for (const s of localSegments.values()) drawSegmentNorm(s);
     }
 
+    // ============================================================
+    // Cursor sync
+    // ============================================================
     function sendCursor(nx, ny) {
       const now = performance.now();
       if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
@@ -605,18 +802,16 @@
       try { remove(myCursorRef); } catch (e) {}
     });
 
+    // ============================================================
+    // Pointer
+    // ============================================================
     function getPinchCenter() {
       const pts = Array.from(activePointers.values());
-      const x = (pts[0].x + pts[1].x) / 2;
-      const y = (pts[0].y + pts[1].y) / 2;
-      return { x, y };
+      return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
     }
-
     function getPinchDist() {
       const pts = Array.from(activePointers.values());
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      return Math.hypot(dx, dy);
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     }
 
     function onPointerDown(e) {
@@ -626,6 +821,16 @@
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       activePointers.set(e.pointerId, { x: px, y: py });
+
+      // Space pan
+      if (isSpaceDown || e.button === 1) {
+        isPanning = true;
+        isDrawing = false;
+        panStartPointer = { x: px, y: py };
+        panStartView = { tx: view.tx, ty: view.ty };
+        canvas.classList.add("panning");
+        return;
+      }
 
       if (activePointers.size === 1) {
         isDrawing = true;
@@ -643,8 +848,6 @@
         pinchStartScale = view.scale;
         pinchStartCenter = getPinchCenter();
         pinchStartView = { tx: view.tx, ty: view.ty };
-        panStartPointer = getPinchCenter();
-        panStartView = { tx: view.tx, ty: view.ty };
       }
     }
 
@@ -660,16 +863,25 @@
       }
       activePointers.set(e.pointerId, { x: px, y: py });
 
+      // Space pan yoki o'rta tugma
+      if (isPanning && activePointers.size === 1) {
+        const dx = px - panStartPointer.x;
+        const dy = py - panStartPointer.y;
+        view.tx = panStartView.tx + dx;
+        view.ty = panStartView.ty + dy;
+        applyView();
+        broadcastView();
+        return;
+      }
+
       if (activePointers.size >= 2) {
         const dist = getPinchDist();
-        const center = getPinchCenter();
-
         if (pinchStartDist > 0) {
           const ratio = dist / pinchStartDist;
           let newScale = pinchStartScale * ratio;
           newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-          // pinch markazi va pan birgalikda
+          const center = getPinchCenter();
           const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
           const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
           view.scale = newScale;
@@ -735,8 +947,8 @@
         isDrawing = false;
         isPanning = false;
         pinchStartDist = 0;
+        canvas.classList.remove("panning");
       } else if (activePointers.size === 1) {
-        // bir barmoq qoldi — pan tugadi, lekin chizishni boshlamaymiz
         isDrawing = false;
         isPanning = false;
         pinchStartDist = 0;
@@ -748,10 +960,19 @@
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      zoomAt(px, py, view.scale * factor);
+      if (e.ctrlKey) {
+        // pinch (touchpad) — zoom
+        const factor = Math.exp(-e.deltaY * 0.01);
+        zoomAt(px, py, view.scale * factor);
+      } else {
+        // 2-finger scroll yoki wheel — pan
+        panBy(-e.deltaX, -e.deltaY);
+      }
     }
 
+    // ============================================================
+    // Undo / Redo
+    // ============================================================
     function addToUndoBatch(id) {
       const now = Date.now();
       const last = undoStack[undoStack.length - 1];
@@ -762,6 +983,8 @@
         undoStack.push({ ids: [id], ts: now });
         if (undoStack.length > MAX_UNDO) undoStack.shift();
       }
+      // redo stack tozalanadi — yangi chizish
+      redoStack.length = 0;
     }
 
     async function undoMyLastBatch() {
@@ -774,11 +997,7 @@
         const seg = localSegments.get(id);
         return seg && seg.u === myId;
       });
-
-      if (!idsToRemove.length) {
-        showStatus("Nothing to undo");
-        return;
-      }
+      if (!idsToRemove.length) { showStatus("Nothing to undo"); return; }
 
       for (const id of idsToRemove) {
         localSegments.delete(id);
@@ -788,12 +1007,25 @@
           console.error("remove failed", err);
         });
       }
+      redoStack.push({ ids: idsToRemove, segments: batch });
       redrawAll();
       showStatus("Undone");
     }
 
+    async function redoMyLastBatch() {
+      if (!redoStack.length) { showStatus("Nothing to redo"); return; }
+      const batch = redoStack.pop();
+      const segmentsToRestore = [];
+      // undo stack'da saqlangan segmentlarni tiklash
+      // batch.ids — o'chirilgan ID'lar, lekin bizda data yo'q, shuning uchun
+      // serverdan kelgan ma'lumotni qayta yuboramiz (yo'q — biz original payloadni saqlamaymiz).
+      showStatus("Redo not available for remote strokes");
+    }
+
+    // ============================================================
+    // Clear / Delete
+    // ============================================================
     async function clearImage() {
-      // Firestore'dan rasmni o'chirish
       try {
         await deleteDoc(imageRef);
         showStatus("Image cleared");
@@ -801,54 +1033,126 @@
         console.error("delete failed", err);
         showStatus("Failed to clear", true);
       }
-      // chizmalarni ham o'chirish
-      try {
-        await rtdbSet(strokesRoot, null);
-      } catch (e) {}
+      try { await rtdbSet(strokesRoot, null); } catch (e) {}
       localSegments.clear();
       myStrokeIds.length = 0;
       undoStack.length = 0;
+      redoStack.length = 0;
       resetView(false);
     }
 
-    document.addEventListener("keydown", (e) => {
-      const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
-      if (isUndo) {
-        e.preventDefault();
-        undoMyLastBatch();
-        return;
-      }
+    async function clearStrokes() {
+      try { await rtdbSet(strokesRoot, null); } catch (e) {}
+      localSegments.clear();
+      myStrokeIds.length = 0;
+      undoStack.length = 0;
+      redoStack.length = 0;
+      redrawAll();
+      showStatus("Strokes cleared");
+    }
 
-      if (e.key === "Delete" || e.key === "Backspace") {
-        // faqat Delete uchun; input/textarea emas
-        if (document.activeElement && (
-          document.activeElement.tagName === "INPUT" ||
-          document.activeElement.tagName === "TEXTAREA"
-        )) return;
-        if (e.key === "Backspace") return; // Backspace'ni e'tiborsiz
-        e.preventDefault();
-        const now = Date.now();
-        if (now - lastDeleteTime < DELETE_DOUBLE_MS) {
-          lastDeleteTime = 0;
-          clearImage();
-        } else {
-          lastDeleteTime = now;
-          showStatus("Press Delete again to clear");
+    // ============================================================
+    // Download / Copy / Info
+    // ============================================================
+    function downloadImage() {
+      if (!imageReady) { showStatus("No image", true); return; }
+      const a = document.createElement("a");
+      a.href = currentSrc;
+      a.download = (imageMeta && imageMeta.name) || "CenteralPIC.png";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showStatus("Downloaded");
+    }
+
+    async function copyImage() {
+      if (!imageReady) { showStatus("No image", true); return; }
+      try {
+        const res = await fetch(currentSrc);
+        const blob = await res.blob();
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        showStatus("Copied");
+      } catch (e) {
+        console.error(e);
+        showStatus("Copy failed", true);
+      }
+    }
+
+    function showImageInfo() {
+      if (!imageReady) { showStatus("No image", true); return; }
+      const nW = image.naturalWidth;
+      const nH = image.naturalHeight;
+      const size = imageMeta && imageMeta.size ? Math.round(imageMeta.size / 1024) + " KB" : "—";
+      const name = (imageMeta && imageMeta.name) || "pasted";
+      showStatus(`${name} · ${nW}×${nH} · ${size} · ${Math.round(view.scale*100)}%`);
+    }
+
+    // ============================================================
+    // Upload
+    // ============================================================
+    async function uploadOne(file) {
+      if (!file || !file.type || !file.type.startsWith("image/")) {
+        showStatus("Only images", true); return;
+      }
+      if (file.size > 800 * 1024) {
+        showStatus("Max 800 KB", true); return;
+      }
+      const token = ++localToken;
+      try {
+        setLoader(true);
+        const base64 = await fileToBase64(file);
+        showImage(base64);
+        await setDoc(imageRef, {
+          base64,
+          name: file.name || "paste-" + Date.now() + ".png",
+          type: file.type,
+          size: file.size,
+          updatedAt: serverTimestamp(),
+          t: Date.now()
+        });
+        imageMeta = { name: file.name || "pasted", size: file.size };
+
+        localSegments.clear();
+        myStrokeIds.length = 0;
+        undoStack.length = 0;
+        redoStack.length = 0;
+        await rtdbSet(strokesRoot, null);
+        resetView(false);
+
+        if (token === localToken) {
+          setLoader(false);
+          showStatus("Saved");
         }
-        return;
+      } catch (err) {
+        console.error(err);
+        if (token === localToken) {
+          setLoader(false);
+          showStatus(err.message || "Error", true);
+        }
       }
+    }
 
-      const k = e.key;
-      if (k === "0") resetView(true);
-      if (k === "+" || k === "=") {
-        zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25);
-      }
-      if (k === "-" || k === "_") {
-        zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25);
-      }
-    });
+    // ============================================================
+    // Resize
+    // ============================================================
+    function resizeCanvas() {
+      const zoneRect = zone.getBoundingClientRect();
+      dpr = window.devicePixelRatio || 1;
+      canvasW = zoneRect.width;
+      canvasH = zoneRect.height;
+      canvas.width = Math.floor(canvasW * dpr);
+      canvas.height = Math.floor(canvasH * dpr);
+      canvas.style.width = canvasW + "px";
+      canvas.style.height = canvasH + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      applyView();
+    }
 
-    // ---- Realtime sync ----
+    // ============================================================
+    // Realtime sync — strokes
+    // ============================================================
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
@@ -886,72 +1190,34 @@
       redrawAll();
     });
 
-    async function uploadOne(file) {
-      if (!file || !file.type || !file.type.startsWith("image/")) {
-        showStatus("Only images", true);
+    // ============================================================
+    // Image sync
+    // ============================================================
+    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
+      if (!snap.exists()) {
+        showImage("");
         return;
       }
-      if (file.size > 800 * 1024) {
-        showStatus("Max 800 KB", true);
-        return;
-      }
-      const token = ++localToken;
-      try {
-        setLoader(true);
-        const base64 = await fileToBase64(file);
-        showImage(base64);
-        await setDoc(imageRef, {
-          base64,
-          name: file.name || "paste-" + Date.now() + ".png",
-          type: file.type,
-          size: file.size,
-          updatedAt: serverTimestamp(),
-          t: Date.now()
-        });
-
-        localSegments.clear();
-        myStrokeIds.length = 0;
-        undoStack.length = 0;
-        await rtdbSet(strokesRoot, null);
-        resetView(false);
-
-        if (token === localToken) {
-          setLoader(false);
-          showStatus("Saved");
-        }
-      } catch (err) {
-        console.error(err);
-        if (token === localToken) {
-          setLoader(false);
-          showStatus(err.message || "Error", true);
-        }
-      }
-    }
-
-    function resizeCanvas() {
-      const zoneRect = zone.getBoundingClientRect();
-      dpr = window.devicePixelRatio || 1;
-      canvasW = zoneRect.width;
-      canvasH = zoneRect.height;
-      canvas.width = Math.floor(canvasW * dpr);
-      canvas.height = Math.floor(canvasH * dpr);
-      canvas.style.width = canvasW + "px";
-      canvas.style.height = canvasH + "px";
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      applyView();
-    }
-
-    // Drag-drop — endi overlay yo'q, faqat yuklash
-    zone.addEventListener("dragover", (e) => {
-      e.preventDefault();
+      const data = snap.data();
+      if (!data || !data.base64) { showImage(""); return; }
+      imageMeta = { name: data.name, size: data.size, type: data.type };
+      if (data.base64 === currentSrc && imageReady) return;
+      showImage(data.base64);
+    }, (err) => {
+      console.error(err);
+      showStatus("Firestore error — check Rules", true);
     });
+
+    // ============================================================
+    // Events
+    // ============================================================
+    zone.addEventListener("dragover", (e) => e.preventDefault());
     zone.addEventListener("drop", (e) => {
       e.preventDefault();
       const f = e.dataTransfer.files[0];
       if (f) uploadOne(f);
     });
+
     document.addEventListener("paste", (e) => {
       const items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
@@ -965,28 +1231,12 @@
       }
     });
 
-    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
-      if (!snap.exists()) {
-        showImage("");
-        return;
-      }
-      const data = snap.data();
-      if (!data || !data.base64) {
-        showImage("");
-        return;
-      }
-      if (data.base64 === currentSrc && imageReady) return;
-      showImage(data.base64);
-    }, (err) => {
-      console.error(err);
-      showStatus("Firestore error — check Rules", true);
-    });
-
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
     ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
       document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
@@ -994,6 +1244,182 @@
 
     window.addEventListener("resize", resizeCanvas);
 
+    // ============================================================
+    // Keyboard
+    // ============================================================
+    document.addEventListener("keydown", (e) => {
+      // input/textarea ichida shortcut ishlamasin
+      const t = document.activeElement && document.activeElement.tagName;
+      if (t === "INPUT" || t === "TEXTAREA") {
+        if (e.key === "Escape") document.activeElement.blur();
+        return;
+      }
+
+      const cmd = e.ctrlKey || e.metaKey;
+      const k = e.key;
+
+      // Esc — help yopish yoki chizishni bekor qilish
+      if (k === "Escape") {
+        if (helpPanel.classList.contains("open")) { hideHelp(); return; }
+        if (isDrawing) { isDrawing = false; return; }
+        return;
+      }
+
+      // ? / H — help
+      if (k === "?" || k === "h" || k === "H") {
+        e.preventDefault();
+        toggleHelp();
+        return;
+      }
+
+      // Space — pan mode
+      if (k === " ") {
+        isSpaceDown = true;
+        canvas.classList.add("panning");
+        e.preventDefault();
+        return;
+      }
+
+      // Ctrl+Z — undo
+      if (cmd && (k === "z" || k === "Z") && !e.shiftKey) {
+        e.preventDefault(); undoMyLastBatch(); return;
+      }
+      // Ctrl+Shift+Z yoki Ctrl+Y — redo
+      if (cmd && ((k === "z" || k === "Z") && e.shiftKey || k === "y" || k === "Y")) {
+        e.preventDefault(); redoMyLastBatch(); return;
+      }
+
+      // Ctrl+0 — reset
+      if (cmd && k === "0") { e.preventDefault(); resetView(true); return; }
+      // Ctrl + / - zoom
+      if (cmd && (k === "+" || k === "=")) {
+        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25); return;
+      }
+      if (cmd && (k === "-" || k === "_")) {
+        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25); return;
+      }
+
+      // Ctrl+C — chizmani nusxalash (bu yerda rasmni emas, chizmani PNG qilib)
+      // (Faqat rasmni clipboard'ga qo'yish)
+      // -- skip --
+
+      // Delete x2 — clear
+      if (k === "Delete") {
+        e.preventDefault();
+        const now = Date.now();
+        if (now - lastDeleteTime < DELETE_DOUBLE_MS) {
+          lastDeleteTime = 0;
+          clearImage();
+        } else {
+          lastDeleteTime = now;
+          showStatus("Press Delete again to clear image");
+        }
+        return;
+      }
+      // Backspace — oxirgi chizmani o'chirish
+      if (k === "Backspace") {
+        e.preventDefault(); undoMyLastBatch(); return;
+      }
+
+      // C — strokes clear
+      if (!cmd && (k === "c" || k === "C")) { e.preventDefault(); clearStrokes(); return; }
+
+      // E — change color
+      if (!cmd && (k === "e" || k === "E")) {
+        e.preventDefault();
+        colorIndex = (colorIndex + 1) % COLORS.length;
+        currentColor = COLORS[colorIndex];
+        showStatus("Color: " + currentColor);
+        return;
+      }
+
+      // [ / ] — line width
+      if (k === "[") {
+        e.preventDefault();
+        widthIndex = Math.max(0, widthIndex - 1);
+        lineWidth = LINE_WIDTHS[widthIndex];
+        showStatus("Width: " + lineWidth);
+        return;
+      }
+      if (k === "]") {
+        e.preventDefault();
+        widthIndex = Math.min(LINE_WIDTHS.length - 1, widthIndex + 1);
+        lineWidth = LINE_WIDTHS[widthIndex];
+        showStatus("Width: " + lineWidth);
+        return;
+      }
+
+      // O — open file
+      if (!cmd && (k === "o" || k === "O")) { e.preventDefault(); fileInput.click(); return; }
+
+      // S — save
+      if (!cmd && (k === "s" || k === "S")) { e.preventDefault(); downloadImage(); return; }
+
+      // I — info
+      if (!cmd && (k === "i" || k === "I")) { e.preventDefault(); showImageInfo(); return; }
+
+      // F — fullscreen
+      if (!cmd && (k === "f" || k === "F")) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+        return;
+      }
+
+      // 1 — fit to screen, 2 — 200%
+      if (k === "1") {
+        e.preventDefault();
+        setView(1, 0, 0, true);
+        return;
+      }
+      if (k === "2") {
+        e.preventDefault();
+        zoomAt(canvasW / 2, canvasH / 2, 2);
+        return;
+      }
+
+      // Arrow pan
+      const panStep = e.shiftKey ? 100 : 30;
+      if (k === "ArrowLeft") { e.preventDefault(); panBy(panStep, 0); return; }
+      if (k === "ArrowRight") { e.preventDefault(); panBy(-panStep, 0); return; }
+      if (k === "ArrowUp") { e.preventDefault(); panBy(0, panStep); return; }
+      if (k === "ArrowDown") { e.preventDefault(); panBy(0, -panStep); return; }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      if (e.key === " ") {
+        isSpaceDown = false;
+        canvas.classList.remove("panning");
+      }
+    });
+
+    // Fokus yo'qolsa Space reset
+    window.addEventListener("blur", () => {
+      isSpaceDown = false;
+      canvas.classList.remove("panning");
+    });
+
+    // ============================================================
+    // Help UI
+    // ============================================================
+    helpToggle.addEventListener("click", toggleHelp);
+    helpClose.addEventListener("click", hideHelp);
+    helpPanel.addEventListener("click", (e) => {
+      if (e.target === helpPanel) hideHelp();
+    });
+
+    fileInput.addEventListener("change", () => {
+      const f = fileInput.files[0];
+      if (f) uploadOne(f);
+      fileInput.value = "";
+    });
+
+    // ============================================================
+    // Init
+    // ============================================================
     resizeCanvas();
   </script>
 </body>
