@@ -216,10 +216,14 @@
     let currentSrc = "";
     let localToken = 0;
     let isDrawing = false;
-    let lastX = 0;
-    let lastY = 0;
     const lineWidth = 8;
     const currentColor = "#ff0000";
+
+    // ----- pointer holati -----
+    let lastSentX = 0;       // oxirgi YUBORILGAN nuqta
+    let lastSentY = 0;
+    let lastPointerX = 0;    // oxirgi pointer pozitsiyasi
+    let lastPointerY = 0;
 
     // ----- stroke state -----
     const myId = Math.random().toString(36).slice(2, 10);
@@ -227,8 +231,6 @@
     const myStrokeIds = [];            // mening chizganlarim
     const undoStack = [];              // batch'lar
     const MAX_UNDO = 100;
-    let lastSendTime = 0;
-    const MIN_SEND_INTERVAL = 25;      // ms — throttle
 
     function showStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -313,8 +315,12 @@
       e.preventDefault();
       isDrawing = true;
       const rect = canvas.getBoundingClientRect();
-      lastX = e.clientX - rect.left;
-      lastY = e.clientY - rect.top;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      lastSentX = x;
+      lastSentY = y;
+      lastPointerX = x;
+      lastPointerY = y;
       cursorPreview.classList.add("active");
       updateCursorPosition(e);
     }
@@ -327,30 +333,48 @@
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      // lokal chizish — darhol
-      const s = {
-        x0: lastX, y0: lastY, x1: x, y1: y,
-        c: currentColor, w: lineWidth, u: myId
+      // juda yaqin nuqtalarni tashlab yuborish (trafikni kamaytiradi)
+      const dx = x - lastPointerX;
+      const dy = y - lastPointerY;
+      if (dx * dx + dy * dy < 4) return;
+
+      // 1) lokal chizish — pointer harakatiga to'liq silliq
+      ctx.strokeStyle = currentColor;
+      ctx.lineWidth = lineWidth;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(lastPointerX, lastPointerY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+
+      lastPointerX = x;
+      lastPointerY = y;
+
+      // 2) serverga yuborish — oldingi YUBORILGAN nuqtadan hozirgi pointergacha.
+      //    Segmentlar doim tutash bo'ladi.
+      const segRef = push(strokesRoot);
+      const id = segRef.key;
+      const payload = {
+        x0: lastSentX,
+        y0: lastSentY,
+        x1: x,
+        y1: y,
+        c: currentColor,
+        w: lineWidth,
+        u: myId,
+        t: Date.now()
       };
-      drawSegment(s);
+      localSegments.set(id, payload);
+      myStrokeIds.push(id);
+      addToUndoBatch(id);
+      rtdbSet(segRef, payload).catch((err) => {
+        console.error("push failed", err);
+      });
 
-      // serverga throttled yuborish
-      const now = performance.now();
-      if (now - lastSendTime >= MIN_SEND_INTERVAL) {
-        lastSendTime = now;
-        const segRef = push(strokesRoot);
-        const id = segRef.key;
-        const payload = { ...s, t: Date.now() };
-        localSegments.set(id, payload);
-        myStrokeIds.push(id);
-        addToUndoBatch(id);
-        rtdbSet(segRef, payload).catch((err) => {
-          console.error("push failed", err);
-        });
-      }
-
-      lastX = x;
-      lastY = y;
+      // 3) keyingi segment shu nuqtadan boshlanadi
+      lastSentX = x;
+      lastSentY = y;
     }
 
     function stopDrawing() {
@@ -406,7 +430,6 @@
     });
 
     // ----- Realtime sync -----
-    // boshlang'ich yuklash — oxirgi 5000 segment
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
@@ -425,10 +448,9 @@
       }
     })();
 
-    // yangi segment (boshqalar yoki o'zim)
     onChildAdded(strokesRoot, (child) => {
       const id = child.key;
-      if (localSegments.has(id)) return;   // allaqachon chizganmiz
+      if (localSegments.has(id)) return;
       const s = child.val();
       if (!s) return;
       localSegments.set(id, s);
@@ -436,7 +458,6 @@
       if (s.u === myId) myStrokeIds.push(id);
     });
 
-    // o'chirilgan segment (undo)
     onChildRemoved(strokesRoot, (child) => {
       const id = child.key;
       if (!localSegments.has(id)) return;
@@ -470,7 +491,6 @@
           t: Date.now()
         });
 
-        // yangi rasm → barcha chiziqlarni tozalash
         localSegments.clear();
         myStrokeIds.length = 0;
         undoStack.length = 0;
