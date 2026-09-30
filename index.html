@@ -24,21 +24,33 @@
       overflow: hidden;
       touch-action: none;
     }
-    .zone.dragover { background: #141414; }
-    .zone.dragover::after {
-      content: "";
+
+    /* blur-in animatsiya — rasm yuklanganda */
+    #canvas {
       position: absolute;
-      inset: 12px;
-      border: 2px dashed #404040;
-      border-radius: 12px;
-      pointer-events: none;
-      z-index: 2;
-      animation: pulseBorder 1s ease-in-out infinite;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      z-index: 3;
+      display: block;
+      touch-action: none;
+      cursor: crosshair;
+      opacity: 0;
+      filter: blur(24px) brightness(0.8);
+      transition: opacity 0.15s linear, filter 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: opacity, filter;
     }
-    @keyframes pulseBorder {
-      0%, 100% { opacity: 0.45; }
-      50% { opacity: 1; }
+    #canvas.revealed {
+      opacity: 1;
+      filter: blur(0) brightness(1);
     }
+    #canvas.clearing {
+      opacity: 0;
+      filter: blur(16px) brightness(0.7);
+      transition: opacity 0.25s ease, filter 0.25s ease;
+    }
+
     .hint {
       color: #525252;
       z-index: 1;
@@ -67,7 +79,6 @@
       letter-spacing: 0.02em;
     }
     .zone.has-image .hint { opacity: 0; }
-    .zone.dragover .hint { color: #a3a3a3; }
 
     .loader {
       position: fixed;
@@ -116,17 +127,6 @@
       color: #f87171;
       border-color: #7f1d1d;
     }
-    #canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: auto;
-      z-index: 3;
-      display: block;
-      touch-action: none;
-      cursor: crosshair;
-    }
 
     .remote-cursor {
       position: absolute;
@@ -163,30 +163,6 @@
       border: 1px solid currentColor;
     }
 
-    .zoom-controls {
-      position: fixed;
-      top: 14px;
-      right: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      z-index: 40;
-    }
-    .zoom-controls button {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: #1a1a1a;
-      color: #d4d4d4;
-      border: 1px solid #333;
-      font-size: 18px;
-      cursor: pointer;
-      user-select: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .zoom-controls button:active { background: #262626; }
     .zoom-badge {
       position: fixed;
       top: 14px;
@@ -211,19 +187,13 @@
   <div class="zone" id="zone">
     <p class="hint">
       <span class="brand">Centeral<span class="accent">PIC</span></span>
-      <span class="sub">Drop or Ctrl+V &nbsp;·&nbsp; Ctrl+Z — undo &nbsp;·&nbsp; pinch / scroll — zoom</span>
+      <span class="sub">Drop or Ctrl+V<br>Ctrl+Z — undo &nbsp;·&nbsp; 2-finger pan &nbsp;·&nbsp; pinch — zoom</span>
     </p>
     <input type="file" id="fileInput" accept="image/*">
     <canvas id="canvas"></canvas>
   </div>
 
-  <div class="zoom-controls">
-    <button id="zoomIn" title="Zoom in">+</button>
-    <button id="zoomOut" title="Zoom out">−</button>
-    <button id="zoomReset" title="Reset">⌂</button>
-  </div>
   <div class="zoom-badge" id="zoomBadge">100%</div>
-
   <div class="loader" id="loader"></div>
   <div class="status" id="status"></div>
 
@@ -233,6 +203,7 @@
       getFirestore,
       doc,
       setDoc,
+      deleteDoc,
       onSnapshot,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
@@ -241,15 +212,15 @@
       ref,
       push,
       remove,
+      set as rtdbSet,
+      update as rtdbUpdate,
+      onValue,
       onChildAdded,
       onChildRemoved,
-      onValue,
       onDisconnect,
       query,
       limitToLast,
-      get,
-      set as rtdbSet,
-      update as rtdbUpdate
+      get
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
     const firebaseConfig = {
@@ -268,6 +239,7 @@
     const imageRef = doc(db, "app", "mainImage");
     const strokesRoot = ref(rtdb, "strokes");
     const cursorsRoot = ref(rtdb, "cursors");
+    const viewRoot = ref(rtdb, "view");
 
     const zone = document.getElementById("zone");
     const statusEl = document.getElementById("status");
@@ -285,9 +257,12 @@
     image.crossOrigin = "anonymous";
     let imageReady = false;
 
+    // ---- viewport ----
     const view = { scale: 1, tx: 0, ty: 0 };
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 8;
+    let remoteViewApplying = false;
+    let viewSendTimer = null;
 
     let lastSentX = 0;
     let lastSentY = 0;
@@ -307,24 +282,29 @@
 
     const activePointers = new Map();
     let isDrawing = false;
+    let isPanning = false;
     let pinchStartDist = 0;
     let pinchStartScale = 1;
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
+    let panStartPointer = { x: 0, y: 0 };
+    let panStartView = { tx: 0, ty: 0 };
 
     let canvasW = 0, canvasH = 0;
     let dpr = 1;
 
+    // ---- Delete 2x tez bosish ----
+    let lastDeleteTime = 0;
+    const DELETE_DOUBLE_MS = 500;
+
     function getImageRect() {
-      const zW = canvasW;
-      const zH = canvasH;
       const nW = image.naturalWidth || 1;
       const nH = image.naturalHeight || 1;
-      const scale = Math.min(zW / nW, zH / nH);
+      const scale = Math.min(canvasW / nW, canvasH / nH);
       const w = nW * scale;
       const h = nH * scale;
-      const left = (zW - w) / 2;
-      const top = (zH - h) / 2;
+      const left = (canvasW - w) / 2;
+      const top = (canvasH - h) / 2;
       return { left, top, width: w, height: h };
     }
 
@@ -360,6 +340,36 @@
       showZoomBadge();
     }
 
+    function broadcastView() {
+      // throttle — 80ms
+      if (viewSendTimer) return;
+      viewSendTimer = setTimeout(() => {
+        viewSendTimer = null;
+        rtdbSet(viewRoot, {
+          scale: +view.scale.toFixed(4),
+          tx: +view.tx.toFixed(2),
+          ty: +view.ty.toFixed(2),
+          t: Date.now()
+        }).catch(() => {});
+      }, 80);
+    }
+
+    onValue(viewRoot, (snap) => {
+      const v = snap.val();
+      if (!v) return;
+      // o'zimizning oxirgi yuborganimiz bo'lsa — e'tiborsiz qoldiramiz
+      // (agar yaqin kelib qolsa)
+      const same =
+        Math.abs(v.scale - view.scale) < 0.0005 &&
+        Math.abs(v.tx - view.tx) < 0.5 &&
+        Math.abs(v.ty - view.ty) < 0.5;
+      if (same) return;
+      view.scale = v.scale;
+      view.tx = v.tx;
+      view.ty = v.ty;
+      applyView();
+    });
+
     function showZoomBadge() {
       zoomBadge.textContent = Math.round(view.scale * 100) + "%";
       zoomBadge.classList.add("show");
@@ -367,7 +377,7 @@
       showZoomBadge._t = setTimeout(() => zoomBadge.classList.remove("show"), 1200);
     }
 
-    function zoomAt(px, py, newScale) {
+    function zoomAt(px, py, newScale, broadcast = true) {
       newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
       const cx = (px - view.tx) / view.scale;
       const cy = (py - view.ty) / view.scale;
@@ -375,13 +385,15 @@
       view.tx = px - cx * newScale;
       view.ty = py - cy * newScale;
       applyView();
+      if (broadcast) broadcastView();
     }
 
-    function resetView() {
+    function resetView(broadcast = true) {
       view.scale = 1;
       view.tx = 0;
       view.ty = 0;
       applyView();
+      if (broadcast) broadcastView();
     }
 
     function pickColor(seed) {
@@ -410,20 +422,50 @@
       });
     }
 
+    // ---- blur-in reveal ----
+    function revealCanvas() {
+      canvas.classList.remove("clearing");
+      requestAnimationFrame(() => {
+        canvas.classList.add("revealed");
+      });
+    }
+    function hideCanvas() {
+      canvas.classList.remove("revealed");
+      canvas.classList.add("clearing");
+    }
+    function resetCanvasAnim() {
+      canvas.classList.remove("revealed", "clearing");
+    }
+
     function showImage(src) {
       if (!src) {
         imageReady = false;
         currentSrc = "";
         zone.classList.remove("has-image");
-        redrawAll();
+        hideCanvas();
+        // rasm o'chirilgach biroz kutib reset qilamiz
+        setTimeout(() => {
+          if (!imageReady) {
+            resetCanvasAnim();
+            redrawAll();
+          }
+        }, 300);
         return;
       }
-      if (src === currentSrc) return;
+      if (src === currentSrc && imageReady) return;
+      // yangi rasm — avval blur, keyin sharp
+      resetCanvasAnim();
+      imageReady = false;
       currentSrc = src;
       image.onload = () => {
         imageReady = true;
         zone.classList.add("has-image");
         applyView();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            revealCanvas();
+          });
+        });
       };
       image.onerror = () => {
         console.error("image load failed");
@@ -587,6 +629,7 @@
 
       if (activePointers.size === 1) {
         isDrawing = true;
+        isPanning = false;
         const n = screenToNorm(px, py);
         lastSentX = n.x;
         lastSentY = n.y;
@@ -595,10 +638,13 @@
         sendCursor(n.x, n.y);
       } else if (activePointers.size === 2) {
         isDrawing = false;
+        isPanning = true;
         pinchStartDist = getPinchDist();
         pinchStartScale = view.scale;
         pinchStartCenter = getPinchCenter();
         pinchStartView = { tx: view.tx, ty: view.ty };
+        panStartPointer = getPinchCenter();
+        panStartView = { tx: view.tx, ty: view.ty };
       }
     }
 
@@ -616,18 +662,21 @@
 
       if (activePointers.size >= 2) {
         const dist = getPinchDist();
+        const center = getPinchCenter();
+
         if (pinchStartDist > 0) {
           const ratio = dist / pinchStartDist;
           let newScale = pinchStartScale * ratio;
           newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-          const center = getPinchCenter();
+          // pinch markazi va pan birgalikda
           const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
           const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
           view.scale = newScale;
           view.tx = center.x - cx * newScale;
           view.ty = center.y - cy * newScale;
           applyView();
+          broadcastView();
         }
         return;
       }
@@ -684,9 +733,12 @@
 
       if (activePointers.size === 0) {
         isDrawing = false;
+        isPanning = false;
         pinchStartDist = 0;
       } else if (activePointers.size === 1) {
+        // bir barmoq qoldi — pan tugadi, lekin chizishni boshlamaymiz
         isDrawing = false;
+        isPanning = false;
         pinchStartDist = 0;
       }
     }
@@ -699,14 +751,6 @@
       const factor = Math.exp(-e.deltaY * 0.0015);
       zoomAt(px, py, view.scale * factor);
     }
-
-    document.getElementById("zoomIn").addEventListener("click", () => {
-      zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25);
-    });
-    document.getElementById("zoomOut").addEventListener("click", () => {
-      zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25);
-    });
-    document.getElementById("zoomReset").addEventListener("click", resetView);
 
     function addToUndoBatch(id) {
       const now = Date.now();
@@ -748,6 +792,25 @@
       showStatus("Undone");
     }
 
+    async function clearImage() {
+      // Firestore'dan rasmni o'chirish
+      try {
+        await deleteDoc(imageRef);
+        showStatus("Image cleared");
+      } catch (err) {
+        console.error("delete failed", err);
+        showStatus("Failed to clear", true);
+      }
+      // chizmalarni ham o'chirish
+      try {
+        await rtdbSet(strokesRoot, null);
+      } catch (e) {}
+      localSegments.clear();
+      myStrokeIds.length = 0;
+      undoStack.length = 0;
+      resetView(false);
+    }
+
     document.addEventListener("keydown", (e) => {
       const isUndo = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z";
       if (isUndo) {
@@ -755,8 +818,28 @@
         undoMyLastBatch();
         return;
       }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        // faqat Delete uchun; input/textarea emas
+        if (document.activeElement && (
+          document.activeElement.tagName === "INPUT" ||
+          document.activeElement.tagName === "TEXTAREA"
+        )) return;
+        if (e.key === "Backspace") return; // Backspace'ni e'tiborsiz
+        e.preventDefault();
+        const now = Date.now();
+        if (now - lastDeleteTime < DELETE_DOUBLE_MS) {
+          lastDeleteTime = 0;
+          clearImage();
+        } else {
+          lastDeleteTime = now;
+          showStatus("Press Delete again to clear");
+        }
+        return;
+      }
+
       const k = e.key;
-      if (k === "0") resetView();
+      if (k === "0") resetView(true);
       if (k === "+" || k === "=") {
         zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25);
       }
@@ -765,6 +848,7 @@
       }
     });
 
+    // ---- Realtime sync ----
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
@@ -828,8 +912,8 @@
         localSegments.clear();
         myStrokeIds.length = 0;
         undoStack.length = 0;
-        resetView();
         await rtdbSet(strokesRoot, null);
+        resetView(false);
 
         if (token === localToken) {
           setLoader(false);
@@ -859,14 +943,12 @@
       applyView();
     }
 
+    // Drag-drop — endi overlay yo'q, faqat yuklash
     zone.addEventListener("dragover", (e) => {
       e.preventDefault();
-      zone.classList.add("dragover");
     });
-    zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
     zone.addEventListener("drop", (e) => {
       e.preventDefault();
-      zone.classList.remove("dragover");
       const f = e.dataTransfer.files[0];
       if (f) uploadOne(f);
     });
@@ -893,7 +975,7 @@
         showImage("");
         return;
       }
-      if (data.base64 === currentSrc) return;
+      if (data.base64 === currentSrc && imageReady) return;
       showImage(data.base64);
     }, (err) => {
       console.error(err);
