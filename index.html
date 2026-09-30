@@ -8,286 +8,165 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
-      width: 100%;
-      height: 100%;
+      width: 100%; height: 100%;
       background: #0a0a0a;
       overflow: hidden;
       font-family: system-ui, -apple-system, sans-serif;
-      touch-action: none;
-      overscroll-behavior: none;
+      touch-action: none; overscroll-behavior: none;
     }
-    .zone {
-      width: 100%;
-      height: 100%;
-      position: relative;
-      background: #0a0a0a;
-      overflow: hidden;
-      touch-action: none;
-    }
-
+    .zone { width: 100%; height: 100%; position: relative; background: #0a0a0a; overflow: hidden; touch-action: none; }
     #canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: auto;
-      z-index: 3;
-      display: block;
-      touch-action: none;
-      cursor: crosshair;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      pointer-events: auto; z-index: 3; display: block;
+      touch-action: none; cursor: crosshair;
       opacity: 0;
       filter: blur(24px) brightness(0.8);
       transition: opacity 0.15s linear, filter 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-      will-change: opacity, filter;
     }
     #canvas.revealed { opacity: 1; filter: blur(0) brightness(1); }
-    #canvas.clearing {
-      opacity: 0;
-      filter: blur(16px) brightness(0.7);
-      transition: opacity 0.25s ease, filter 0.25s ease;
-    }
+    #canvas.clearing { opacity: 0; filter: blur(16px) brightness(0.7); transition: opacity 0.25s ease, filter 0.25s ease; }
     #canvas.panning { cursor: grabbing; }
 
     .hint {
-      color: #525252;
-      z-index: 1;
-      pointer-events: none;
-      transition: opacity 0.25s ease, color 0.2s ease;
-      text-align: center;
-      line-height: 1.6;
-      position: absolute;
-      top: 50%;
-      left: 50%;
+      color: #525252; z-index: 1; pointer-events: none;
+      text-align: center; line-height: 1.6;
+      position: absolute; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
+      transition: opacity 0.25s ease;
     }
-    .hint .brand {
-      display: block;
-      font-size: 1.6rem;
-      font-weight: 600;
-      color: #d4d4d4;
-      letter-spacing: 0.04em;
-      margin-bottom: 10px;
-    }
+    .hint .brand { display: block; font-size: 1.6rem; font-weight: 600; color: #d4d4d4; letter-spacing: 0.04em; margin-bottom: 10px; }
     .hint .brand .accent { color: #ff0000; }
-    .hint .sub {
-      display: block;
-      font-size: 0.9rem;
-      color: #525252;
-      letter-spacing: 0.02em;
-    }
+    .hint .sub { display: block; font-size: 0.9rem; color: #525252; }
     .zone.has-image .hint { opacity: 0; }
 
     .loader {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      height: 2px;
-      width: 0%;
+      position: fixed; bottom: 0; left: 0; height: 2px; width: 0%;
       background: linear-gradient(90deg, #333, #bbb, #333);
-      background-size: 200% 100%;
-      z-index: 20;
-      opacity: 0;
+      background-size: 200% 100%; z-index: 20; opacity: 0;
       transition: opacity 0.15s ease;
     }
-    .loader.active {
-      opacity: 1;
-      width: 100%;
-      animation: shimmer 0.8s linear infinite;
-    }
-    @keyframes shimmer {
-      0% { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
+    .loader.active { opacity: 1; width: 100%; animation: shimmer 0.8s linear infinite; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     #fileInput { display: none; }
 
     .status {
-      position: fixed;
-      bottom: 18px;
-      left: 50%;
+      position: fixed; bottom: 18px; left: 50%;
       transform: translateX(-50%) translateY(6px);
-      padding: 7px 14px;
-      border-radius: 8px;
-      font-size: 0.82rem;
-      background: #1a1a1a;
-      color: #d4d4d4;
-      border: 1px solid #333;
-      opacity: 0;
+      padding: 7px 14px; border-radius: 8px;
+      font-size: 0.82rem; background: #1a1a1a; color: #d4d4d4;
+      border: 1px solid #333; opacity: 0;
       transition: opacity 0.2s ease, transform 0.2s ease;
-      z-index: 10;
-      pointer-events: none;
+      z-index: 10; pointer-events: none;
     }
-    .status.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-    .status.error {
-      background: #1c1010;
-      color: #f87171;
-      border-color: #7f1d1d;
-    }
+    .status.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .status.error { background: #1c1010; color: #f87171; border-color: #7f1d1d; }
 
     .remote-cursor {
-      position: absolute;
-      pointer-events: none;
-      z-index: 25;
-      transition: opacity 200ms ease;
-      opacity: 0;
-      will-change: transform;
-      left: 0;
-      top: 0;
-      width: 32px;
-      height: 32px;
-      transform-origin: 0 0;
+      position: absolute; pointer-events: none; z-index: 25;
+      opacity: 0; will-change: transform;
+      left: 0; top: 0;
+      width: 32px; height: 32px; transform-origin: 0 0;
+      transition: opacity 150ms ease;
     }
     .remote-cursor.visible { opacity: 1; }
-    .remote-cursor svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-      filter: drop-shadow(0 0 4px rgba(0,0,0,0.85)) drop-shadow(0 0 8px currentColor);
-    }
+    .remote-cursor svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 4px rgba(0,0,0,0.85)) drop-shadow(0 0 8px currentColor); }
     .remote-cursor .label {
-      position: absolute;
-      top: 24px;
-      left: 26px;
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(0,0,0,0.75);
-      color: #fff;
-      white-space: nowrap;
-      font-family: ui-monospace, monospace;
-      letter-spacing: 0.02em;
+      position: absolute; top: 24px; left: 26px;
+      font-size: 10px; padding: 2px 6px; border-radius: 4px;
+      background: rgba(0,0,0,0.75); color: #fff;
+      white-space: nowrap; font-family: ui-monospace, monospace;
       border: 1px solid currentColor;
     }
 
     .zoom-badge {
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      padding: 5px 10px;
-      border-radius: 6px;
-      background: rgba(20,20,20,0.8);
-      color: #a3a3a3;
-      border: 1px solid #333;
-      font-size: 11px;
+      position: fixed; top: 14px; left: 14px;
+      padding: 5px 10px; border-radius: 6px;
+      background: rgba(20,20,20,0.8); color: #a3a3a3;
+      border: 1px solid #333; font-size: 11px;
       font-family: ui-monospace, monospace;
-      z-index: 40;
-      user-select: none;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.2s;
+      z-index: 40; user-select: none; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s;
     }
     .zoom-badge.show { opacity: 1; }
 
-    /* ---- yordam paneli ---- */
-    .help-toggle {
-      position: fixed;
-      top: 14px;
-      right: 14px;
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: #1a1a1a;
-      color: #d4d4d4;
-      border: 1px solid #333;
-      font-size: 18px;
-      cursor: pointer;
-      user-select: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
+    .state-badge {
+      position: fixed; top: 14px; left: 78px;
+      padding: 5px 10px 5px 28px; border-radius: 6px;
+      background: rgba(20,20,20,0.8); color: #a3a3a3;
+      border: 1px solid #333; font-size: 11px;
       font-family: ui-monospace, monospace;
+      z-index: 40; user-select: none; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .state-badge.show { opacity: 1; }
+    .state-badge::before {
+      content: ""; position: absolute; left: 8px; top: 50%;
+      width: 12px; height: 12px; border-radius: 50%;
+      transform: translateY(-50%);
+      background: var(--dot-color, #ff0000);
+      border: 1px solid #333;
+    }
+
+    .ping-badge {
+      position: fixed; top: 14px; right: 60px;
+      padding: 5px 10px; border-radius: 6px;
+      background: rgba(20,20,20,0.8); color: #22c55e;
+      border: 1px solid #333; font-size: 11px;
+      font-family: ui-monospace, monospace;
+      z-index: 40; user-select: none; pointer-events: none;
+      display: flex; gap: 6px; align-items: center;
+    }
+    .ping-badge.warn { color: #eab308; }
+    .ping-badge.bad { color: #ef4444; }
+    .ping-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    .help-toggle {
+      position: fixed; top: 14px; right: 14px;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: #1a1a1a; color: #d4d4d4;
+      border: 1px solid #333; font-size: 18px;
+      cursor: pointer; user-select: none;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 50; font-family: ui-monospace, monospace;
     }
     .help-toggle:hover { background: #262626; }
 
     .help-panel {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.85);
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
       backdrop-filter: blur(6px);
-      z-index: 60;
-      display: none;
-      overflow-y: auto;
-      padding: 40px 20px;
-      opacity: 0;
-      transition: opacity 0.2s ease;
+      z-index: 60; display: none;
+      overflow-y: auto; padding: 40px 20px;
+      opacity: 0; transition: opacity 0.2s ease;
     }
     .help-panel.open { display: block; opacity: 1; }
-    .help-content {
-      max-width: 900px;
-      margin: 0 auto;
-      color: #d4d4d4;
-    }
-    .help-content h1 {
-      font-size: 1.6rem;
-      font-weight: 600;
-      color: #fff;
-      margin-bottom: 4px;
-      letter-spacing: 0.02em;
-    }
+    .help-content { max-width: 900px; margin: 0 auto; color: #d4d4d4; }
+    .help-content h1 { font-size: 1.6rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
     .help-content h1 .accent { color: #ff0000; }
-    .help-content .sub {
-      color: #737373;
-      font-size: 0.85rem;
-      margin-bottom: 30px;
-    }
+    .help-content .sub { color: #737373; font-size: 0.85rem; margin-bottom: 30px; }
     .help-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 20px;
     }
-    .help-section {
-      background: #141414;
-      border: 1px solid #262626;
-      border-radius: 10px;
-      padding: 16px 18px;
-    }
-    .help-section h2 {
-      font-size: 0.85rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #737373;
-      margin-bottom: 12px;
-      font-weight: 600;
-    }
-    .help-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
-      font-size: 0.85rem;
-      border-bottom: 1px solid #1a1a1a;
-    }
+    .help-section { background: #141414; border: 1px solid #262626; border-radius: 10px; padding: 16px 18px; }
+    .help-section h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; color: #737373; margin-bottom: 12px; font-weight: 600; }
+    .help-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 0.85rem; border-bottom: 1px solid #1a1a1a; }
     .help-row:last-child { border-bottom: none; }
     .help-row .desc { color: #a3a3a3; }
     .help-row kbd {
-      display: inline-block;
-      padding: 2px 7px;
-      border-radius: 4px;
-      background: #262626;
-      border: 1px solid #333;
-      border-bottom-width: 2px;
+      display: inline-block; padding: 2px 7px;
+      border-radius: 4px; background: #262626;
+      border: 1px solid #333; border-bottom-width: 2px;
       font-family: ui-monospace, monospace;
-      font-size: 0.75rem;
-      color: #e5e5e5;
-      margin-left: 4px;
+      font-size: 0.75rem; color: #e5e5e5; margin-left: 4px;
     }
     .help-close {
-      position: fixed;
-      top: 14px;
-      right: 14px;
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: #1a1a1a;
-      color: #d4d4d4;
-      border: 1px solid #333;
-      font-size: 18px;
-      cursor: pointer;
-      z-index: 70;
-      display: none;
+      position: fixed; top: 14px; right: 14px;
+      width: 36px; height: 36px; border-radius: 8px;
+      background: #1a1a1a; color: #d4d4d4;
+      border: 1px solid #333; font-size: 18px;
+      cursor: pointer; z-index: 70; display: none;
     }
     .help-panel.open ~ .help-close { display: flex; align-items: center; justify-content: center; }
   </style>
@@ -303,6 +182,8 @@
   </div>
 
   <div class="zoom-badge" id="zoomBadge">100%</div>
+  <div class="state-badge" id="stateBadge">#ff0000 · w8</div>
+  <div class="ping-badge" id="pingBadge"><span class="dot"></span><span id="pingText">—</span></div>
   <div class="loader" id="loader"></div>
   <div class="status" id="status"></div>
 
@@ -312,47 +193,41 @@
     <button class="help-close" id="helpClose">✕</button>
     <div class="help-content">
       <h1>Centeral<span class="accent">PIC</span> — Shortcuts</h1>
-      <p class="sub">Klaviatura tugmalari va gesture'lar</p>
+      <p class="sub">BroadcastChannel (~0.5ms) + WebRTC P2P (~10ms) · Firebase RTDB (fallback ~100ms)</p>
 
       <div class="help-grid">
         <div class="help-section">
-          <h2>View / Navigatsiya</h2>
-          <div class="help-row"><span class="desc">Zoom in</span><span><kbd>+</kbd><kbd>=</kbd></span></div>
-          <div class="help-row"><span class="desc">Zoom out</span><span><kbd>-</kbd><kbd>_</kbd></span></div>
-          <div class="help-row"><span class="desc">Reset view</span><span><kbd>0</kbd></span></div>
-          <div class="help-row"><span class="desc">Fit to screen</span><span><kbd>1</kbd></span></div>
-          <div class="help-row"><span class="desc">200% zoom</span><span><kbd>2</kbd></span></div>
-          <div class="help-row"><span class="desc">Pan</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></span></div>
-          <div class="help-row"><span class="desc">Tezroq pan</span><span><kbd>Shift</kbd>+<kbd>↑↓←→</kbd></span></div>
-          <div class="help-row"><span class="desc">Pinch zoom</span><span><kbd>2 barmoq</kbd></span></div>
-          <div class="help-row"><span class="desc">Touchpad pan</span><span><kbd>2 barmoq surish</kbd></span></div>
+          <h2>View</h2>
+          <div class="help-row"><span class="desc">Zoom in/out</span><span><kbd>+</kbd><kbd>-</kbd></span></div>
+          <div class="help-row"><span class="desc">Reset / Fit</span><span><kbd>0</kbd><kbd>1</kbd></span></div>
+          <div class="help-row"><span class="desc">200%</span><span><kbd>2</kbd></span></div>
+          <div class="help-row"><span class="desc">Pan</span><span><kbd>←↑↓→</kbd></span></div>
+          <div class="help-row"><span class="desc">Space+drag</span><span><kbd>Space</kbd></span></div>
+          <div class="help-row"><span class="desc">Pinch</span><span><kbd>2 barmoq</kbd></span></div>
           <div class="help-row"><span class="desc">Fullscreen</span><span><kbd>F</kbd></span></div>
         </div>
 
         <div class="help-section">
-          <h2>Chizish / Tahrirlash</h2>
-          <div class="help-row"><span class="desc">Undo</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
-          <div class="help-row"><span class="desc">Redo</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></span></div>
-          <div class="help-row"><span class="desc">Chizmani o'chirish</span><span><kbd>C</kbd></span></div>
-          <div class="help-row"><span class="desc">Rasmni tozalash</span><span><kbd>Delete</kbd>×2</span></div>
-          <div class="help-row"><span class="desc">Chiziqni ingichka</span><span><kbd>[</kbd></span></div>
-          <div class="help-row"><span class="desc">Chiziqni qalin</span><span><kbd>]</kbd></span></div>
-          <div class="help-row"><span class="desc">Rangni almashtirish</span><span><kbd>E</kbd></span></div>
+          <h2>Chizish</h2>
+          <div class="help-row"><span class="desc">Undo (global)</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
+          <div class="help-row"><span class="desc">Strokes clear</span><span><kbd>C</kbd></span></div>
+          <div class="help-row"><span class="desc">Image clear</span><span><kbd>Del</kbd>×2</span></div>
+          <div class="help-row"><span class="desc">Rang</span><span><kbd>E</kbd></span></div>
+          <div class="help-row"><span class="desc">Ingichka / qalin</span><span><kbd>[</kbd><kbd>]</kbd></span></div>
         </div>
 
         <div class="help-section">
           <h2>Rasm</h2>
-          <div class="help-row"><span class="desc">Clipboard'dan yuklash</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
-          <div class="help-row"><span class="desc">Fayl tanlash</span><span><kbd>O</kbd></span></div>
-          <div class="help-row"><span class="desc">Yuklab olish</span><span><kbd>S</kbd></span></div>
-          <div class="help-row"><span class="desc">Ma'lumot</span><span><kbd>I</kbd></span></div>
+          <div class="help-row"><span class="desc">Paste</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+          <div class="help-row"><span class="desc">Fayl</span><span><kbd>O</kbd></span></div>
+          <div class="help-row"><span class="desc">Download</span><span><kbd>S</kbd></span></div>
+          <div class="help-row"><span class="desc">Info</span><span><kbd>I</kbd></span></div>
         </div>
 
         <div class="help-section">
           <h2>Yordam</h2>
-          <div class="help-row"><span class="desc">Shortcuts paneli</span><span><kbd>?</kbd><kbd>H</kbd></span></div>
-          <div class="help-row"><span class="desc">Yopish / bekor</span><span><kbd>Esc</kbd></span></div>
-          <div class="help-row"><span class="desc">Pan mode (drag)</span><span><kbd>Space</kbd>+drag</span></div>
+          <div class="help-row"><span class="desc">Shortcuts</span><span><kbd>?</kbd><kbd>H</kbd></span></div>
+          <div class="help-row"><span class="desc">Yopish</span><span><kbd>Esc</kbd></span></div>
         </div>
       </div>
     </div>
@@ -361,29 +236,16 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
     import {
-      getFirestore,
-      doc,
-      setDoc,
-      deleteDoc,
-      onSnapshot,
-      serverTimestamp
+      getFirestore, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
     import {
-      getDatabase,
-      ref,
-      push,
-      remove,
-      set as rtdbSet,
-      update as rtdbUpdate,
-      onValue,
-      onChildAdded,
-      onChildRemoved,
-      onDisconnect,
-      query,
-      limitToLast,
-      get
+      getDatabase, ref, set as rtdbSet, update as rtdbUpdate, remove,
+      onValue, onChildAdded, onDisconnect, query, limitToLast, get
     } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
+    // ============================================================
+    // CONFIG
+    // ============================================================
     const firebaseConfig = {
       apiKey: "AIzaSyBoyos6hb4yq8FKXRKAtpwERDh6agaF5VU",
       authDomain: "centeralpic.firebaseapp.com",
@@ -394,96 +256,400 @@
       databaseURL: "https://centeralpic-default-rtdb.europe-west1.firebasedatabase.app"
     };
 
+    const ROOM = "centeralpic-main";
+
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const rtdb = getDatabase(app);
     const imageRef = doc(db, "app", "mainImage");
     const strokesRoot = ref(rtdb, "strokes");
-    const cursorsRoot = ref(rtdb, "cursors");
-    const viewRoot = ref(rtdb, "view");
+    const signalingRoot = ref(rtdb, "signaling/" + ROOM);
 
+    // ============================================================
+    // DOM
+    // ============================================================
     const zone = document.getElementById("zone");
     const statusEl = document.getElementById("status");
     const loader = document.getElementById("loader");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     const zoomBadge = document.getElementById("zoomBadge");
+    const stateBadge = document.getElementById("stateBadge");
+    const pingBadge = document.getElementById("pingBadge");
+    const pingText = document.getElementById("pingText");
     const fileInput = document.getElementById("fileInput");
     const helpPanel = document.getElementById("helpPanel");
     const helpToggle = document.getElementById("helpToggle");
     const helpClose = document.getElementById("helpClose");
 
+    // ============================================================
+    // STATE
+    // ============================================================
+    const COLORS = ["#ff0000", "#22c55e", "#3b82f6", "#eab308", "#ffffff", "#ec4899", "#f97316", "#a855f7"];
+    const LINE_WIDTHS = [2, 4, 6, 8, 12, 16, 24];
+
+    const state = { colorIndex: 0, widthIndex: 3, helpOpen: false };
+    function currentColor() { return COLORS[state.colorIndex]; }
+    function currentWidth() { return LINE_WIDTHS[state.widthIndex]; }
+
     let currentSrc = "";
     let localToken = 0;
-
-    // ---- sozlamalar ----
-    const COLORS = ["#ff0000", "#00ff00", "#0080ff", "#ffff00", "#ff00ff", "#00ffff", "#ffffff", "#000000"];
-    let colorIndex = 0;
-    let currentColor = COLORS[colorIndex];
-
-    const LINE_WIDTHS = [2, 4, 6, 8, 12, 16, 24];
-    let widthIndex = 3;
-    let lineWidth = LINE_WIDTHS[widthIndex];
 
     const image = new Image();
     image.crossOrigin = "anonymous";
     let imageReady = false;
     let imageMeta = null;
 
-    // ---- viewport ----
     const view = { scale: 1, tx: 0, ty: 0 };
-    const MIN_SCALE = 0.25;
-    const MAX_SCALE = 16;
-    let viewSendTimer = null;
+    const MIN_SCALE = 0.25, MAX_SCALE = 16;
 
-    // ---- pan/pan by keyboard ----
     let isSpaceDown = false;
     let isPanning = false;
     let panStartPointer = { x: 0, y: 0 };
     let panStartView = { tx: 0, ty: 0 };
 
-    let lastSentX = 0;
-    let lastSentY = 0;
-    let lastPointerX = 0;
-    let lastPointerY = 0;
+    let lastSentX = 0, lastSentY = 0;
+    let lastPointerX = 0, lastPointerY = 0;
 
     const myId = Math.random().toString(36).slice(2, 10);
     const localSegments = new Map();
-    const myStrokeIds = [];
-    const undoStack = [];
-    const redoStack = [];
-    const MAX_UNDO = 100;
-
-    const myCursorRef = ref(rtdb, "cursors/" + myId);
     const remoteCursors = new Map();
-    let lastCursorSend = 0;
-    const CURSOR_SEND_INTERVAL = 40;
 
     const activePointers = new Map();
     let isDrawing = false;
-    let pinchStartDist = 0;
-    let pinchStartScale = 1;
+    let pinchStartDist = 0, pinchStartScale = 1;
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
 
-    let canvasW = 0, canvasH = 0;
-    let dpr = 1;
-
+    let canvasW = 0, canvasH = 0, dpr = 1;
     let lastDeleteTime = 0;
     const DELETE_DOUBLE_MS = 500;
 
     // ============================================================
-    // Geometry
+    // TRANSPORT LAYER
+    // Bir xil brauzerda: BroadcastChannel (~0.5ms)
+    // Turli qurilmalarda: WebRTC P2P (~10ms)
+    // Fallback: RTDB (~100ms)
+    // ============================================================
+
+    // --- 1. BroadcastChannel (same-browser, same-origin) ---
+    const bc = ("BroadcastChannel" in window) ? new BroadcastChannel("centeralpic-" + ROOM) : null;
+    if (bc) {
+      bc.onmessage = (e) => {
+        const msg = e.data;
+        if (!msg || msg.from === myId) return;
+        handleMessage(msg.from, msg);
+      };
+    }
+
+    // --- 2. WebRTC P2P mesh ---
+    const peers = new Map(); // peerId -> { pc, dc, connected, created }
+    const handledSdp = new Set();
+    const handledIce = new Set();
+
+    const ICE = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:global.stun.twilio.com:3478" }
+      ]
+    };
+
+    function createPeer(remoteId, initiator) {
+      if (peers.has(remoteId)) return peers.get(remoteId);
+      const pc = new RTCPeerConnection(ICE);
+      const entry = { pc, dc: null, connected: false, created: Date.now() };
+      peers.set(remoteId, entry);
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          const path = `signaling/${ROOM}/${remoteId}/ice/${myId}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          rtdbSet(ref(rtdb, path), e.candidate.toJSON()).catch(() => {});
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+          cleanupPeer(remoteId);
+        }
+      };
+
+      pc.ondatachannel = (e) => {
+        setupDataChannel(remoteId, e.channel);
+      };
+
+      if (initiator) {
+        const dc = pc.createDataChannel("d", { ordered: false, maxRetransmits: 0 });
+        setupDataChannel(remoteId, dc);
+        pc.createOffer()
+          .then((offer) => pc.setLocalDescription(offer))
+          .then(() => {
+            const path = `signaling/${ROOM}/${remoteId}/sdp/${myId}`;
+            rtdbSet(ref(rtdb, path), {
+              type: pc.localDescription.type,
+              sdp: pc.localDescription.sdp
+            }).catch(() => {});
+          })
+          .catch((err) => { console.error("offer", err); cleanupPeer(remoteId); });
+      }
+
+      return entry;
+    }
+
+    function setupDataChannel(remoteId, dc) {
+      const entry = peers.get(remoteId);
+      if (!entry) return;
+      entry.dc = dc;
+      dc.binaryType = "arraybuffer";
+      dc.onopen = () => { entry.connected = true; };
+      dc.onclose = () => { entry.connected = false; };
+      dc.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          handleMessage(remoteId, msg);
+        } catch (err) {}
+      };
+    }
+
+    function cleanupPeer(remoteId) {
+      const entry = peers.get(remoteId);
+      if (!entry) return;
+      try { entry.dc && entry.dc.close(); } catch (e) {}
+      try { entry.pc.close(); } catch (e) {}
+      peers.delete(remoteId);
+      rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}`), null).catch(() => {});
+    }
+
+    async function handleRemoteSdp(fromId, sdp) {
+      const key = fromId + ":" + sdp.type + ":" + (sdp.sdp || "").slice(0, 40);
+      if (handledSdp.has(key)) return;
+      handledSdp.add(key);
+
+      let entry = peers.get(fromId);
+      if (!entry) entry = createPeer(fromId, false);
+      const pc = entry.pc;
+
+      try {
+        if (sdp.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          const path = `signaling/${ROOM}/${fromId}/sdp/${myId}`;
+          await rtdbSet(ref(rtdb, path), { type: answer.type, sdp: answer.sdp });
+        } else if (sdp.type === "answer") {
+          if (pc.signalingState === "have-local-offer") {
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          }
+        }
+      } catch (err) { console.error("SDP err", err); }
+    }
+
+    async function handleRemoteIce(fromId, cand, cid) {
+      const key = fromId + ":" + cid;
+      if (handledIce.has(key)) return;
+      handledIce.add(key);
+      let entry = peers.get(fromId);
+      if (!entry) entry = createPeer(fromId, false);
+      try {
+        await entry.pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (err) {}
+    }
+
+    // Signaling tinglash — menga qaratilgan
+    onValue(ref(rtdb, `signaling/${ROOM}/${myId}`), (snap) => {
+      const data = snap.val();
+      if (!data) return;
+      const sdpRoot = data.sdp || {};
+      for (const fromId in sdpRoot) {
+        if (fromId === myId) continue;
+        const sdp = sdpRoot[fromId];
+        if (!sdp || !sdp.type) continue;
+        handleRemoteSdp(fromId, sdp);
+      }
+      const iceRoot = data.ice || {};
+      for (const fromId in iceRoot) {
+        if (fromId === myId) continue;
+        const cands = iceRoot[fromId] || {};
+        for (const cid in cands) {
+          handleRemoteIce(fromId, cands[cid], cid);
+        }
+      }
+    });
+
+    // Peers ro'yxati — kim birinchi bo'lsa initiator
+    onChildAdded(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
+      const otherId = child.key;
+      if (otherId === myId) return;
+      const initiator = myId < otherId;
+      createPeer(otherId, initiator);
+    });
+
+    // O'zimni ro'yxatga qo'shish
+    rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: Date.now() }).catch(() => {});
+    onDisconnect(ref(rtdb, `signaling/${ROOM}/peers/${myId}`)).remove();
+    onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
+
+    // Eski peer'larni tozalash
+    setInterval(() => {
+      const now = Date.now();
+      for (const [id, e] of peers) {
+        if (!e.connected && now - e.created > 20000) cleanupPeer(id);
+      }
+    }, 5000);
+
+    // --- 3. RTDB fallback (peer bo'lmasa yoki broadcast ishlamasa) ---
+    // Strokes — initial load
+    (async () => {
+      try {
+        const q = query(strokesRoot, limitToLast(3000));
+        const snap = await get(q);
+        if (snap.exists()) {
+          snap.forEach((child) => {
+            const s = child.val();
+            if (!s) return;
+            localSegments.set(child.key, s);
+          });
+          redrawAll();
+        }
+      } catch (e) {}
+    })();
+
+    onChildAdded(strokesRoot, (child) => {
+      const id = child.key;
+      if (localSegments.has(id)) return;
+      const s = child.val();
+      if (!s) return;
+      localSegments.set(id, s);
+      drawSegmentNorm(s);
+    });
+
+    // --- 4. Universal send ---
+    function send(msg) {
+      msg.from = myId;
+      // 1) BroadcastChannel — bir xil brauzerda lahzali
+      if (bc) {
+        try { bc.postMessage(msg); } catch (e) {}
+      }
+      // 2) WebRTC P2P — turli qurilmalar uchun tez
+      const str = JSON.stringify(msg);
+      let sentP2P = false;
+      for (const [id, p] of peers) {
+        if (p.dc && p.dc.readyState === "open") {
+          try { p.dc.send(str); sentP2P = true; } catch (e) {}
+        }
+      }
+      // 3) RTDB fallback — faqat muhim xabarlar uchun (stroke emas)
+      // Strokes uchun fallback ishlatilmaydi, chunki bu sekin.
+      return sentP2P;
+    }
+
+    // ============================================================
+    // MESSAGE HANDLER — barcha transportlardan keladi
+    // ============================================================
+    function handleMessage(fromId, msg) {
+      if (!msg || fromId === myId) return;
+
+      switch (msg.t) {
+        case "s": { // stroke
+          const s = msg.s;
+          if (!s || localSegments.has(s.id)) return;
+          localSegments.set(s.id, s);
+          drawSegmentNorm(s);
+          // RTDB'ga yozish — keyin qo'shilganlar uchun (throttled)
+          scheduleStrokePersist(s);
+          break;
+        }
+        case "u": { // undo — ids massiv
+          if (Array.isArray(msg.ids)) {
+            for (const id of msg.ids) localSegments.delete(id);
+            redrawAll();
+          }
+          break;
+        }
+        case "c": { // clear strokes
+          localSegments.clear();
+          redrawAll();
+          break;
+        }
+        case "v": { // view
+          if (
+            Math.abs(msg.scale - view.scale) < 0.0005 &&
+            Math.abs(msg.tx - view.tx) < 0.5 &&
+            Math.abs(msg.ty - view.ty) < 0.5
+          ) return;
+          view.scale = msg.scale;
+          view.tx = msg.tx;
+          view.ty = msg.ty;
+          applyView();
+          break;
+        }
+        case "p": { // cursor position
+          placeRemoteCursor(fromId, msg.x, msg.y);
+          break;
+        }
+        case "st": { // state (color, width, help)
+          applyRemoteState(msg);
+          break;
+        }
+        case "ping": {
+          send({ t: "pong", ts: msg.ts, to: fromId });
+          break;
+        }
+        case "pong": {
+          if (msg.to === myId) updatePing(Date.now() - msg.ts);
+          break;
+        }
+      }
+    }
+
+    // ============================================================
+    // Stroke persistence (RTDB) — throttled, keyingi foydalanuvchilar uchun
+    // ============================================================
+    let strokePersistQueue = [];
+    let strokePersistTimer = null;
+
+    function scheduleStrokePersist(s) {
+      strokePersistQueue.push(s);
+      if (strokePersistTimer) return;
+      strokePersistTimer = setTimeout(flushStrokePersist, 200);
+    }
+
+    async function flushStrokePersist() {
+      strokePersistTimer = null;
+      const batch = strokePersistQueue.splice(0);
+      if (!batch.length) return;
+      const updates = {};
+      for (const s of batch) {
+        updates["strokes/" + s.id] = s;
+      }
+      try {
+        await rtdbUpdate(ref(rtdb), updates);
+      } catch (e) {}
+    }
+
+    // ============================================================
+    // Ping
+    // ============================================================
+    function updatePing(ms) {
+      pingText.textContent = ms + "ms";
+      pingBadge.classList.remove("warn", "bad");
+      if (ms > 60) pingBadge.classList.add("warn");
+      if (ms > 150) pingBadge.classList.add("bad");
+    }
+
+    setInterval(() => {
+      send({ t: "ping", ts: Date.now() });
+    }, 2000);
+
+    // ============================================================
+    // GEOMETRY
     // ============================================================
     function getImageRect() {
       const nW = image.naturalWidth || 1;
       const nH = image.naturalHeight || 1;
       const scale = Math.min(canvasW / nW, canvasH / nH);
-      const w = nW * scale;
-      const h = nH * scale;
-      const left = (canvasW - w) / 2;
-      const top = (canvasH - h) / 2;
-      return { left, top, width: w, height: h };
+      const w = nW * scale, h = nH * scale;
+      return { left: (canvasW - w) / 2, top: (canvasH - h) / 2, width: w, height: h };
     }
     function screenToNorm(px, py) {
       const cx = (px - view.tx) / view.scale;
@@ -493,13 +659,14 @@
     }
     function normToScreen(nx, ny) {
       const r = getImageRect();
-      const cx = r.left + nx * r.width;
-      const cy = r.top + ny * r.height;
-      return { x: cx * view.scale + view.tx, y: cy * view.scale + view.ty };
+      return {
+        x: (r.left + nx * r.width) * view.scale + view.tx,
+        y: (r.top + ny * r.height) * view.scale + view.ty
+      };
     }
 
     // ============================================================
-    // View / broadcast
+    // VIEW
     // ============================================================
     function applyView() {
       redrawAll();
@@ -513,33 +680,6 @@
       showZoomBadge();
     }
 
-    function broadcastView() {
-      if (viewSendTimer) return;
-      viewSendTimer = setTimeout(() => {
-        viewSendTimer = null;
-        rtdbSet(viewRoot, {
-          scale: +view.scale.toFixed(4),
-          tx: +view.tx.toFixed(2),
-          ty: +view.ty.toFixed(2),
-          t: Date.now()
-        }).catch(() => {});
-      }, 80);
-    }
-
-    onValue(viewRoot, (snap) => {
-      const v = snap.val();
-      if (!v) return;
-      const same =
-        Math.abs(v.scale - view.scale) < 0.0005 &&
-        Math.abs(v.tx - view.tx) < 0.5 &&
-        Math.abs(v.ty - view.ty) < 0.5;
-      if (same) return;
-      view.scale = v.scale;
-      view.tx = v.tx;
-      view.ty = v.ty;
-      applyView();
-    });
-
     function showZoomBadge() {
       zoomBadge.textContent = Math.round(view.scale * 100) + "%";
       zoomBadge.classList.add("show");
@@ -547,7 +687,7 @@
       showZoomBadge._t = setTimeout(() => zoomBadge.classList.remove("show"), 1200);
     }
 
-    function zoomAt(px, py, newScale, broadcast = true) {
+    function zoomAt(px, py, newScale, sync = true) {
       newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
       const cx = (px - view.tx) / view.scale;
       const cy = (py - view.ty) / view.scale;
@@ -555,119 +695,130 @@
       view.tx = px - cx * newScale;
       view.ty = py - cy * newScale;
       applyView();
-      if (broadcast) broadcastView();
+      if (sync) send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
     }
 
-    function resetView(broadcast = true) {
-      view.scale = 1;
-      view.tx = 0;
-      view.ty = 0;
+    function resetView(sync = true) {
+      view.scale = 1; view.tx = 0; view.ty = 0;
       applyView();
-      if (broadcast) broadcastView();
+      if (sync) send({ t: "v", scale: 1, tx: 0, ty: 0 });
     }
 
-    function setView(scale, tx, ty, broadcast = true) {
-      view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
-      view.tx = tx;
-      view.ty = ty;
+    function panBy(dx, dy, sync = true) {
+      view.tx += dx; view.ty += dy;
       applyView();
-      if (broadcast) broadcastView();
-    }
-
-    function panBy(dx, dy, broadcast = true) {
-      view.tx += dx;
-      view.ty += dy;
-      applyView();
-      if (broadcast) broadcastView();
+      if (sync) send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
     }
 
     // ============================================================
-    // Utils
+    // STATE (color, width, help)
     // ============================================================
+    function updateStateBadge() {
+      stateBadge.textContent = `${currentColor()} · w${currentWidth()}`;
+      stateBadge.style.setProperty("--dot-color", currentColor());
+      stateBadge.classList.add("show");
+      clearTimeout(updateStateBadge._t);
+      updateStateBadge._t = setTimeout(() => stateBadge.classList.remove("show"), 1500);
+    }
+
+    function broadcastState() {
+      send({
+        t: "st",
+        ci: state.colorIndex,
+        wi: state.widthIndex,
+        ho: state.helpOpen
+      });
+    }
+
+    function applyRemoteState(msg) {
+      let changed = false;
+      if (typeof msg.ci === "number" && msg.ci !== state.colorIndex) {
+        state.colorIndex = msg.ci; changed = true;
+      }
+      if (typeof msg.wi === "number" && msg.wi !== state.widthIndex) {
+        state.widthIndex = msg.wi; changed = true;
+      }
+      if (typeof msg.ho === "boolean" && msg.ho !== state.helpOpen) {
+        state.helpOpen = msg.ho;
+        if (msg.ho) helpPanel.classList.add("open");
+        else helpPanel.classList.remove("open");
+        changed = true;
+      }
+      if (changed) updateStateBadge();
+    }
+
+    // ============================================================
+    // CURSOR
+    // ============================================================
+    const CURSOR_SVG_NS = "http://www.w3.org/2000/svg";
+    const CURSOR_PATH_D = "M 140 80 L 400 260 L 260 290 L 140 410 Z";
+
+    function makeCursorSvg() {
+      const svg = document.createElementNS(CURSOR_SVG_NS, "svg");
+      svg.setAttribute("viewBox", "0 0 512 512");
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      const path = document.createElementNS(CURSOR_SVG_NS, "path");
+      path.setAttribute("d", CURSOR_PATH_D);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "32");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+      return svg;
+    }
+
     function pickColor(seed) {
       let h = 0;
       for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
       return `hsl(${h}, 85%, 60%)`;
     }
 
-    function showStatus(msg, isError = false) {
-      statusEl.textContent = msg;
-      statusEl.className = "status show" + (isError ? " error" : "");
-      clearTimeout(showStatus._t);
-      showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1500);
+    function ensureRemoteCursor(uid) {
+      let c = remoteCursors.get(uid);
+      if (c) return c;
+      const color = pickColor(uid);
+      const el = document.createElement("div");
+      el.className = "remote-cursor";
+      el.style.color = color;
+      el.appendChild(makeCursorSvg());
+      const label = document.createElement("div");
+      label.className = "label";
+      label.style.color = color;
+      label.textContent = uid;
+      el.appendChild(label);
+      zone.appendChild(el);
+      c = { el, nx: 0, ny: 0, t: 0 };
+      remoteCursors.set(uid, c);
+      return c;
     }
 
-    function setLoader(on) { loader.classList.toggle("active", !!on); }
-
-    function fileToBase64(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+    function placeRemoteCursor(uid, nx, ny) {
+      const c = ensureRemoteCursor(uid);
+      c.nx = nx; c.ny = ny; c.t = Date.now();
+      const p = normToScreen(nx, ny);
+      c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+      c.el.classList.add("visible");
     }
 
-    function showHelp() { helpPanel.classList.add("open"); }
-    function hideHelp() { helpPanel.classList.remove("open"); }
-    function toggleHelp() { helpPanel.classList.toggle("open"); }
-
-    // ============================================================
-    // Image reveal animation
-    // ============================================================
-    function revealCanvas() {
-      canvas.classList.remove("clearing");
-      requestAnimationFrame(() => {
-        canvas.classList.add("revealed");
-      });
-    }
-    function hideCanvas() {
-      canvas.classList.remove("revealed");
-      canvas.classList.add("clearing");
-    }
-    function resetCanvasAnim() {
-      canvas.classList.remove("revealed", "clearing");
+    function removeRemoteCursor(uid) {
+      const c = remoteCursors.get(uid);
+      if (!c) return;
+      c.el.remove();
+      remoteCursors.delete(uid);
     }
 
-    function showImage(src) {
-      if (!src) {
-        imageReady = false;
-        currentSrc = "";
-        imageMeta = null;
-        zone.classList.remove("has-image");
-        hideCanvas();
-        setTimeout(() => {
-          if (!imageReady) {
-            resetCanvasAnim();
-            redrawAll();
-          }
-        }, 300);
-        return;
+    setInterval(() => {
+      const now = Date.now();
+      for (const [uid, c] of remoteCursors) {
+        if (now - c.t > 5000) removeRemoteCursor(uid);
       }
-      if (src === currentSrc && imageReady) return;
-      resetCanvasAnim();
-      imageReady = false;
-      currentSrc = src;
-      image.onload = () => {
-        imageReady = true;
-        zone.classList.add("has-image");
-        applyView();
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            revealCanvas();
-          });
-        });
-      };
-      image.onerror = () => {
-        console.error("image load failed");
-        imageReady = false;
-        redrawAll();
-      };
-      image.src = src;
-    }
+    }, 2000);
 
     // ============================================================
-    // Draw
+    // DRAW
     // ============================================================
     function drawImage() {
       if (!imageReady) return;
@@ -706,104 +857,46 @@
     }
 
     // ============================================================
-    // Cursor sync
+    // IMAGE
     // ============================================================
-    function sendCursor(nx, ny) {
-      const now = performance.now();
-      if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
-      lastCursorSend = now;
-      rtdbUpdate(myCursorRef, {
-        x: +nx.toFixed(4),
-        y: +ny.toFixed(4),
-        t: Date.now()
-      }).catch(() => {});
-    }
-
-    const CURSOR_SVG_NS = "http://www.w3.org/2000/svg";
-    const CURSOR_PATH_D = "M 140 80 L 400 260 L 260 290 L 140 410 Z";
-
-    function makeCursorSvg() {
-      const svg = document.createElementNS(CURSOR_SVG_NS, "svg");
-      svg.setAttribute("viewBox", "0 0 512 512");
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      const path = document.createElementNS(CURSOR_SVG_NS, "path");
-      path.setAttribute("d", CURSOR_PATH_D);
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "32");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      return svg;
-    }
-
-    function ensureRemoteCursor(uid) {
-      let c = remoteCursors.get(uid);
-      if (c) return c;
-      const color = pickColor(uid);
-      const el = document.createElement("div");
-      el.className = "remote-cursor";
-      el.style.color = color;
-
-      const svg = makeCursorSvg();
-      el.appendChild(svg);
-
-      const label = document.createElement("div");
-      label.className = "label";
-      label.style.color = color;
-      label.textContent = uid;
-      el.appendChild(label);
-
-      zone.appendChild(el);
-      c = { el, nx: 0, ny: 0, t: 0 };
-      remoteCursors.set(uid, c);
-      return c;
-    }
-
-    function placeRemoteCursor(uid, nx, ny, t) {
-      const c = ensureRemoteCursor(uid);
-      c.nx = nx; c.ny = ny; c.t = t;
-      const p = normToScreen(nx, ny);
-      c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
-      c.el.classList.add("visible");
-    }
-
-    function removeRemoteCursor(uid) {
-      const c = remoteCursors.get(uid);
-      if (!c) return;
-      c.el.remove();
-      remoteCursors.delete(uid);
-    }
-
-    onValue(cursorsRoot, (snap) => {
-      const data = snap.val() || {};
-      for (const uid in data) {
-        if (uid === myId) continue;
-        const v = data[uid];
-        if (!v) continue;
-        placeRemoteCursor(uid, v.x, v.y, v.t);
+    function showImage(src) {
+      if (!src) {
+        imageReady = false;
+        currentSrc = "";
+        imageMeta = null;
+        zone.classList.remove("has-image");
+        canvas.classList.remove("revealed");
+        canvas.classList.add("clearing");
+        setTimeout(() => {
+          if (!imageReady) { canvas.classList.remove("revealed", "clearing"); redrawAll(); }
+        }, 300);
+        return;
       }
-      for (const uid of Array.from(remoteCursors.keys())) {
-        if (!data[uid]) removeRemoteCursor(uid);
-      }
-    });
+      if (src === currentSrc && imageReady) return;
+      canvas.classList.remove("revealed", "clearing");
+      imageReady = false;
+      currentSrc = src;
+      image.onload = () => {
+        imageReady = true;
+        zone.classList.add("has-image");
+        applyView();
+        requestAnimationFrame(() => requestAnimationFrame(() => canvas.classList.add("revealed")));
+      };
+      image.onerror = () => { imageReady = false; redrawAll(); };
+      image.src = src;
+    }
 
-    setInterval(() => {
-      const now = Date.now();
-      for (const [uid, c] of remoteCursors) {
-        if (now - c.t > 5000) removeRemoteCursor(uid);
-      }
-    }, 2000);
-
-    onDisconnect(myCursorRef).remove().catch(() => {});
-    window.addEventListener("beforeunload", () => {
-      try { remove(myCursorRef); } catch (e) {}
-    });
+    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
+      if (!snap.exists()) { showImage(""); return; }
+      const data = snap.data();
+      if (!data || !data.base64) { showImage(""); return; }
+      imageMeta = { name: data.name, size: data.size, type: data.type };
+      if (data.base64 === currentSrc && imageReady) return;
+      showImage(data.base64);
+    }, (err) => { console.error(err); });
 
     // ============================================================
-    // Pointer
+    // POINTER
     // ============================================================
     function getPinchCenter() {
       const pts = Array.from(activePointers.values());
@@ -816,16 +909,13 @@
 
     function onPointerDown(e) {
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       activePointers.set(e.pointerId, { x: px, y: py });
 
-      // Space pan
       if (isSpaceDown || e.button === 1) {
-        isPanning = true;
-        isDrawing = false;
+        isPanning = true; isDrawing = false;
         panStartPointer = { x: px, y: py };
         panStartView = { tx: view.tx, ty: view.ty };
         canvas.classList.add("panning");
@@ -834,16 +924,12 @@
 
       if (activePointers.size === 1) {
         isDrawing = true;
-        isPanning = false;
         const n = screenToNorm(px, py);
-        lastSentX = n.x;
-        lastSentY = n.y;
-        lastPointerX = n.x;
-        lastPointerY = n.y;
-        sendCursor(n.x, n.y);
+        lastSentX = n.x; lastSentY = n.y;
+        lastPointerX = n.x; lastPointerY = n.y;
+        send({ t: "p", x: n.x, y: n.y });
       } else if (activePointers.size === 2) {
-        isDrawing = false;
-        isPanning = true;
+        isDrawing = false; isPanning = true;
         pinchStartDist = getPinchDist();
         pinchStartScale = view.scale;
         pinchStartCenter = getPinchCenter();
@@ -858,19 +944,18 @@
 
       if (!activePointers.has(e.pointerId)) {
         const n = screenToNorm(px, py);
-        sendCursor(n.x, n.y);
+        send({ t: "p", x: n.x, y: n.y });
         return;
       }
       activePointers.set(e.pointerId, { x: px, y: py });
 
-      // Space pan yoki o'rta tugma
       if (isPanning && activePointers.size === 1) {
         const dx = px - panStartPointer.x;
         const dy = py - panStartPointer.y;
         view.tx = panStartView.tx + dx;
         view.ty = panStartView.ty + dy;
         applyView();
-        broadcastView();
+        send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
         return;
       }
 
@@ -880,7 +965,6 @@
           const ratio = dist / pinchStartDist;
           let newScale = pinchStartScale * ratio;
           newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
-
           const center = getPinchCenter();
           const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
           const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
@@ -888,24 +972,25 @@
           view.tx = center.x - cx * newScale;
           view.ty = center.y - cy * newScale;
           applyView();
-          broadcastView();
+          send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
         }
         return;
       }
 
       if (activePointers.size === 1 && isDrawing) {
         const n = screenToNorm(px, py);
-        sendCursor(n.x, n.y);
+        send({ t: "p", x: n.x, y: n.y });
 
         const r = getImageRect();
         const dxPx = (n.x - lastPointerX) * r.width * view.scale;
         const dyPx = (n.y - lastPointerY) * r.height * view.scale;
         if (dxPx * dxPx + dyPx * dyPx < 4) return;
 
+        // lokal chizish
         const a = normToScreen(lastPointerX, lastPointerY);
         const b = normToScreen(n.x, n.y);
-        ctx.strokeStyle = currentColor;
-        ctx.lineWidth = lineWidth * view.scale;
+        ctx.strokeStyle = currentColor();
+        ctx.lineWidth = currentWidth() * view.scale;
         ctx.lineJoin = "round";
         ctx.lineCap = "round";
         ctx.beginPath();
@@ -913,44 +998,38 @@
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
 
-        const segRef = push(strokesRoot);
-        const id = segRef.key;
-        const payload = {
+        // segment
+        const id = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+        const s = {
+          id,
           x0: +lastSentX.toFixed(4),
           y0: +lastSentY.toFixed(4),
           x1: +n.x.toFixed(4),
           y1: +n.y.toFixed(4),
-          c: currentColor,
-          w: lineWidth,
+          c: currentColor(),
+          w: currentWidth(),
           u: myId,
           t: Date.now()
         };
-        localSegments.set(id, payload);
-        myStrokeIds.push(id);
-        addToUndoBatch(id);
-        rtdbSet(segRef, payload).catch((err) => {
-          console.error("push failed", err);
-        });
+        localSegments.set(id, s);
 
-        lastPointerX = n.x;
-        lastPointerY = n.y;
-        lastSentX = n.x;
-        lastSentY = n.y;
+        // barcha transportlar orqali yuborish
+        send({ t: "s", s });
+
+        lastPointerX = n.x; lastPointerY = n.y;
+        lastSentX = n.x; lastSentY = n.y;
       }
     }
 
     function onPointerUp(e) {
       activePointers.delete(e.pointerId);
       try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-
       if (activePointers.size === 0) {
-        isDrawing = false;
-        isPanning = false;
+        isDrawing = false; isPanning = false;
         pinchStartDist = 0;
         canvas.classList.remove("panning");
       } else if (activePointers.size === 1) {
-        isDrawing = false;
-        isPanning = false;
+        isDrawing = false; isPanning = false;
         pinchStartDist = 0;
       }
     }
@@ -961,142 +1040,103 @@
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       if (e.ctrlKey) {
-        // pinch (touchpad) — zoom
         const factor = Math.exp(-e.deltaY * 0.01);
         zoomAt(px, py, view.scale * factor);
       } else {
-        // 2-finger scroll yoki wheel — pan
         panBy(-e.deltaX, -e.deltaY);
       }
     }
 
     // ============================================================
-    // Undo / Redo
+    // GLOBAL UNDO
     // ============================================================
-    function addToUndoBatch(id) {
-      const now = Date.now();
-      const last = undoStack[undoStack.length - 1];
-      if (last && now - last.ts < 700) {
-        last.ids.push(id);
-        last.ts = now;
-      } else {
-        undoStack.push({ ids: [id], ts: now });
-        if (undoStack.length > MAX_UNDO) undoStack.shift();
-      }
-      // redo stack tozalanadi — yangi chizish
-      redoStack.length = 0;
+    let undoLock = false;
+    async function globalUndo() {
+      if (undoLock) return;
+      undoLock = true;
+      try {
+        const q = query(strokesRoot, limitToLast(2000));
+        const snap = await get(q);
+        if (!snap.exists()) { undoLock = false; return; }
+        const arr = [];
+        snap.forEach((child) => arr.push({ id: child.key, ...child.val() }));
+        if (!arr.length) { undoLock = false; return; }
+
+        const last = arr[arr.length - 1];
+        const batch = [last];
+        const cutoff = (last.t || Date.now()) - 700;
+        for (let i = arr.length - 2; i >= 0; i--) {
+          const s = arr[i];
+          if (s.u !== last.u) break;
+          if ((s.t || 0) < cutoff) break;
+          batch.push(s);
+        }
+
+        const ids = batch.map((b) => b.id);
+        for (const id of ids) localSegments.delete(id);
+        redrawAll();
+
+        // P2P + BC
+        send({ t: "u", ids });
+        // RTDB fallback
+        const updates = {};
+        for (const id of ids) updates["strokes/" + id] = null;
+        rtdbUpdate(ref(rtdb), updates).catch(() => {});
+      } catch (err) {}
+      undoLock = false;
     }
 
-    async function undoMyLastBatch() {
-      if (!undoStack.length) {
-        showStatus("Nothing to undo");
-        return;
-      }
-      const batch = undoStack.pop();
-      const idsToRemove = batch.ids.filter((id) => {
-        const seg = localSegments.get(id);
-        return seg && seg.u === myId;
-      });
-      if (!idsToRemove.length) { showStatus("Nothing to undo"); return; }
-
-      for (const id of idsToRemove) {
-        localSegments.delete(id);
-        const idx = myStrokeIds.indexOf(id);
-        if (idx !== -1) myStrokeIds.splice(idx, 1);
-        remove(ref(rtdb, "strokes/" + id)).catch((err) => {
-          console.error("remove failed", err);
-        });
-      }
-      redoStack.push({ ids: idsToRemove, segments: batch });
+    // ============================================================
+    // CLEAR
+    // ============================================================
+    function clearStrokes() {
+      localSegments.clear();
       redrawAll();
-      showStatus("Undone");
+      send({ t: "c" });
+      rtdbSet(strokesRoot, null).catch(() => {});
     }
 
-    async function redoMyLastBatch() {
-      if (!redoStack.length) { showStatus("Nothing to redo"); return; }
-      const batch = redoStack.pop();
-      const segmentsToRestore = [];
-      // undo stack'da saqlangan segmentlarni tiklash
-      // batch.ids — o'chirilgan ID'lar, lekin bizda data yo'q, shuning uchun
-      // serverdan kelgan ma'lumotni qayta yuboramiz (yo'q — biz original payloadni saqlamaymiz).
-      showStatus("Redo not available for remote strokes");
-    }
-
-    // ============================================================
-    // Clear / Delete
-    // ============================================================
     async function clearImage() {
-      try {
-        await deleteDoc(imageRef);
-        showStatus("Image cleared");
-      } catch (err) {
-        console.error("delete failed", err);
-        showStatus("Failed to clear", true);
-      }
-      try { await rtdbSet(strokesRoot, null); } catch (e) {}
-      localSegments.clear();
-      myStrokeIds.length = 0;
-      undoStack.length = 0;
-      redoStack.length = 0;
-      resetView(false);
-    }
-
-    async function clearStrokes() {
-      try { await rtdbSet(strokesRoot, null); } catch (e) {}
-      localSegments.clear();
-      myStrokeIds.length = 0;
-      undoStack.length = 0;
-      redoStack.length = 0;
-      redrawAll();
-      showStatus("Strokes cleared");
+      try { await deleteDoc(imageRef); } catch (e) {}
+      clearStrokes();
+      resetView(true);
     }
 
     // ============================================================
-    // Download / Copy / Info
+    // HELPERS
     // ============================================================
-    function downloadImage() {
-      if (!imageReady) { showStatus("No image", true); return; }
-      const a = document.createElement("a");
-      a.href = currentSrc;
-      a.download = (imageMeta && imageMeta.name) || "CenteralPIC.png";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showStatus("Downloaded");
+    function showStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = "status show" + (isError ? " error" : "");
+      clearTimeout(showStatus._t);
+      showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1200);
+    }
+    function setLoader(on) { loader.classList.toggle("active", !!on); }
+    function fileToBase64(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
     }
 
-    async function copyImage() {
-      if (!imageReady) { showStatus("No image", true); return; }
-      try {
-        const res = await fetch(currentSrc);
-        const blob = await res.blob();
-        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-        showStatus("Copied");
-      } catch (e) {
-        console.error(e);
-        showStatus("Copy failed", true);
-      }
-    }
-
-    function showImageInfo() {
-      if (!imageReady) { showStatus("No image", true); return; }
-      const nW = image.naturalWidth;
-      const nH = image.naturalHeight;
-      const size = imageMeta && imageMeta.size ? Math.round(imageMeta.size / 1024) + " KB" : "—";
-      const name = (imageMeta && imageMeta.name) || "pasted";
-      showStatus(`${name} · ${nW}×${nH} · ${size} · ${Math.round(view.scale*100)}%`);
+    function showHelp() { state.helpOpen = true; helpPanel.classList.add("open"); broadcastState(); }
+    function hideHelp() { state.helpOpen = false; helpPanel.classList.remove("open"); broadcastState(); }
+    function toggleHelp() {
+      state.helpOpen = !state.helpOpen;
+      helpPanel.classList.toggle("open", state.helpOpen);
+      broadcastState();
     }
 
     // ============================================================
-    // Upload
+    // UPLOAD
     // ============================================================
     async function uploadOne(file) {
       if (!file || !file.type || !file.type.startsWith("image/")) {
         showStatus("Only images", true); return;
       }
-      if (file.size > 800 * 1024) {
-        showStatus("Max 800 KB", true); return;
-      }
+      if (file.size > 800 * 1024) { showStatus("Max 800 KB", true); return; }
       const token = ++localToken;
       try {
         setLoader(true);
@@ -1111,35 +1151,44 @@
           t: Date.now()
         });
         imageMeta = { name: file.name || "pasted", size: file.size };
-
-        localSegments.clear();
-        myStrokeIds.length = 0;
-        undoStack.length = 0;
-        redoStack.length = 0;
-        await rtdbSet(strokesRoot, null);
-        resetView(false);
-
-        if (token === localToken) {
-          setLoader(false);
-          showStatus("Saved");
-        }
+        clearStrokes();
+        resetView(true);
+        if (token === localToken) { setLoader(false); showStatus("Saved"); }
       } catch (err) {
         console.error(err);
-        if (token === localToken) {
-          setLoader(false);
-          showStatus(err.message || "Error", true);
-        }
+        if (token === localToken) { setLoader(false); showStatus(err.message || "Error", true); }
       }
     }
 
     // ============================================================
-    // Resize
+    // DOWNLOAD / INFO
+    // ============================================================
+    function downloadImage() {
+      if (!imageReady) { showStatus("No image", true); return; }
+      const a = document.createElement("a");
+      a.href = currentSrc;
+      a.download = (imageMeta && imageMeta.name) || "CenteralPIC.png";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showStatus("Downloaded");
+    }
+
+    function showImageInfo() {
+      if (!imageReady) { showStatus("No image", true); return; }
+      const nW = image.naturalWidth, nH = image.naturalHeight;
+      const size = imageMeta && imageMeta.size ? Math.round(imageMeta.size / 1024) + " KB" : "—";
+      const name = (imageMeta && imageMeta.name) || "pasted";
+      showStatus(`${name} · ${nW}×${nH} · ${size} · ${Math.round(view.scale * 100)}%`);
+    }
+
+    // ============================================================
+    // RESIZE
     // ============================================================
     function resizeCanvas() {
-      const zoneRect = zone.getBoundingClientRect();
+      const r = zone.getBoundingClientRect();
       dpr = window.devicePixelRatio || 1;
-      canvasW = zoneRect.width;
-      canvasH = zoneRect.height;
+      canvasW = r.width; canvasH = r.height;
       canvas.width = Math.floor(canvasW * dpr);
       canvas.height = Math.floor(canvasH * dpr);
       canvas.style.width = canvasW + "px";
@@ -1151,65 +1200,7 @@
     }
 
     // ============================================================
-    // Realtime sync — strokes
-    // ============================================================
-    (async () => {
-      try {
-        const q = query(strokesRoot, limitToLast(5000));
-        const snap = await get(q);
-        if (snap.exists()) {
-          snap.forEach((child) => {
-            const s = child.val();
-            if (!s) return;
-            localSegments.set(child.key, s);
-            if (s.u === myId) myStrokeIds.push(child.key);
-          });
-          redrawAll();
-        }
-      } catch (e) {
-        console.error("initial load failed", e);
-      }
-    })();
-
-    onChildAdded(strokesRoot, (child) => {
-      const id = child.key;
-      if (localSegments.has(id)) return;
-      const s = child.val();
-      if (!s) return;
-      localSegments.set(id, s);
-      drawSegmentNorm(s);
-      if (s.u === myId) myStrokeIds.push(id);
-    });
-
-    onChildRemoved(strokesRoot, (child) => {
-      const id = child.key;
-      if (!localSegments.has(id)) return;
-      localSegments.delete(id);
-      const idx = myStrokeIds.indexOf(id);
-      if (idx !== -1) myStrokeIds.splice(idx, 1);
-      redrawAll();
-    });
-
-    // ============================================================
-    // Image sync
-    // ============================================================
-    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
-      if (!snap.exists()) {
-        showImage("");
-        return;
-      }
-      const data = snap.data();
-      if (!data || !data.base64) { showImage(""); return; }
-      imageMeta = { name: data.name, size: data.size, type: data.type };
-      if (data.base64 === currentSrc && imageReady) return;
-      showImage(data.base64);
-    }, (err) => {
-      console.error(err);
-      showStatus("Firestore error — check Rules", true);
-    });
-
-    // ============================================================
-    // Events
+    // EVENTS
     // ============================================================
     zone.addEventListener("dragover", (e) => e.preventDefault());
     zone.addEventListener("drop", (e) => {
@@ -1243,12 +1234,14 @@
     });
 
     window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("beforeunload", () => {
+      if (bc) bc.close();
+    });
 
     // ============================================================
-    // Keyboard
+    // KEYBOARD
     // ============================================================
     document.addEventListener("keydown", (e) => {
-      // input/textarea ichida shortcut ishlamasin
       const t = document.activeElement && document.activeElement.tagName;
       if (t === "INPUT" || t === "TEXTAREA") {
         if (e.key === "Escape") document.activeElement.blur();
@@ -1258,130 +1251,74 @@
       const cmd = e.ctrlKey || e.metaKey;
       const k = e.key;
 
-      // Esc — help yopish yoki chizishni bekor qilish
       if (k === "Escape") {
-        if (helpPanel.classList.contains("open")) { hideHelp(); return; }
+        if (state.helpOpen) { hideHelp(); return; }
         if (isDrawing) { isDrawing = false; return; }
         return;
       }
-
-      // ? / H — help
-      if (k === "?" || k === "h" || k === "H") {
-        e.preventDefault();
-        toggleHelp();
-        return;
-      }
-
-      // Space — pan mode
+      if (k === "?" || k === "h" || k === "H") { e.preventDefault(); toggleHelp(); return; }
       if (k === " ") {
         isSpaceDown = true;
         canvas.classList.add("panning");
         e.preventDefault();
         return;
       }
-
-      // Ctrl+Z — undo
       if (cmd && (k === "z" || k === "Z") && !e.shiftKey) {
-        e.preventDefault(); undoMyLastBatch(); return;
+        e.preventDefault(); globalUndo(); return;
       }
-      // Ctrl+Shift+Z yoki Ctrl+Y — redo
-      if (cmd && ((k === "z" || k === "Z") && e.shiftKey || k === "y" || k === "Y")) {
-        e.preventDefault(); redoMyLastBatch(); return;
-      }
-
-      // Ctrl+0 — reset
       if (cmd && k === "0") { e.preventDefault(); resetView(true); return; }
-      // Ctrl + / - zoom
       if (cmd && (k === "+" || k === "=")) {
         e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25); return;
       }
       if (cmd && (k === "-" || k === "_")) {
         e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25); return;
       }
-
-      // Ctrl+C — chizmani nusxalash (bu yerda rasmni emas, chizmani PNG qilib)
-      // (Faqat rasmni clipboard'ga qo'yish)
-      // -- skip --
-
-      // Delete x2 — clear
       if (k === "Delete") {
         e.preventDefault();
         const now = Date.now();
         if (now - lastDeleteTime < DELETE_DOUBLE_MS) {
-          lastDeleteTime = 0;
-          clearImage();
+          lastDeleteTime = 0; clearImage();
         } else {
           lastDeleteTime = now;
-          showStatus("Press Delete again to clear image");
+          showStatus("Press Delete again to clear");
         }
         return;
       }
-      // Backspace — oxirgi chizmani o'chirish
-      if (k === "Backspace") {
-        e.preventDefault(); undoMyLastBatch(); return;
-      }
-
-      // C — strokes clear
+      if (k === "Backspace") { e.preventDefault(); globalUndo(); return; }
       if (!cmd && (k === "c" || k === "C")) { e.preventDefault(); clearStrokes(); return; }
-
-      // E — change color
       if (!cmd && (k === "e" || k === "E")) {
         e.preventDefault();
-        colorIndex = (colorIndex + 1) % COLORS.length;
-        currentColor = COLORS[colorIndex];
-        showStatus("Color: " + currentColor);
+        state.colorIndex = (state.colorIndex + 1) % COLORS.length;
+        updateStateBadge(); broadcastState();
+        showStatus("Color: " + currentColor());
         return;
       }
-
-      // [ / ] — line width
       if (k === "[") {
         e.preventDefault();
-        widthIndex = Math.max(0, widthIndex - 1);
-        lineWidth = LINE_WIDTHS[widthIndex];
-        showStatus("Width: " + lineWidth);
+        state.widthIndex = Math.max(0, state.widthIndex - 1);
+        updateStateBadge(); broadcastState();
+        showStatus("Width: " + currentWidth());
         return;
       }
       if (k === "]") {
         e.preventDefault();
-        widthIndex = Math.min(LINE_WIDTHS.length - 1, widthIndex + 1);
-        lineWidth = LINE_WIDTHS[widthIndex];
-        showStatus("Width: " + lineWidth);
+        state.widthIndex = Math.min(LINE_WIDTHS.length - 1, state.widthIndex + 1);
+        updateStateBadge(); broadcastState();
+        showStatus("Width: " + currentWidth());
         return;
       }
-
-      // O — open file
       if (!cmd && (k === "o" || k === "O")) { e.preventDefault(); fileInput.click(); return; }
-
-      // S — save
       if (!cmd && (k === "s" || k === "S")) { e.preventDefault(); downloadImage(); return; }
-
-      // I — info
       if (!cmd && (k === "i" || k === "I")) { e.preventDefault(); showImageInfo(); return; }
-
-      // F — fullscreen
       if (!cmd && (k === "f" || k === "F")) {
         e.preventDefault();
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(() => {});
-        } else {
-          document.exitFullscreen().catch(() => {});
-        }
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+        else document.exitFullscreen().catch(() => {});
         return;
       }
+      if (k === "1") { e.preventDefault(); resetView(true); return; }
+      if (k === "2") { e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, 2); return; }
 
-      // 1 — fit to screen, 2 — 200%
-      if (k === "1") {
-        e.preventDefault();
-        setView(1, 0, 0, true);
-        return;
-      }
-      if (k === "2") {
-        e.preventDefault();
-        zoomAt(canvasW / 2, canvasH / 2, 2);
-        return;
-      }
-
-      // Arrow pan
       const panStep = e.shiftKey ? 100 : 30;
       if (k === "ArrowLeft") { e.preventDefault(); panBy(panStep, 0); return; }
       if (k === "ArrowRight") { e.preventDefault(); panBy(-panStep, 0); return; }
@@ -1390,20 +1327,14 @@
     });
 
     document.addEventListener("keyup", (e) => {
-      if (e.key === " ") {
-        isSpaceDown = false;
-        canvas.classList.remove("panning");
-      }
+      if (e.key === " ") { isSpaceDown = false; canvas.classList.remove("panning"); }
     });
-
-    // Fokus yo'qolsa Space reset
     window.addEventListener("blur", () => {
-      isSpaceDown = false;
-      canvas.classList.remove("panning");
+      isSpaceDown = false; canvas.classList.remove("panning");
     });
 
     // ============================================================
-    // Help UI
+    // HELP UI
     // ============================================================
     helpToggle.addEventListener("click", toggleHelp);
     helpClose.addEventListener("click", hideHelp);
@@ -1418,7 +1349,7 @@
     });
 
     // ============================================================
-    // Init
+    // INIT
     // ============================================================
     resizeCanvas();
   </script>
