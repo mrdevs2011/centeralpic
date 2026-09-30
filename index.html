@@ -156,14 +156,15 @@
     }
     .cursor-preview.active { display: block; }
 
-    /* boshqa foydalanuvchilarning kursorlari */
     .remote-cursor {
       position: absolute;
       pointer-events: none;
       z-index: 25;
-      transition: transform 60ms linear, opacity 200ms ease;
+      transition: transform 80ms linear, opacity 200ms ease;
       opacity: 0;
       will-change: transform;
+      left: 0;
+      top: 0;
     }
     .remote-cursor.visible { opacity: 1; }
     .remote-cursor .dot {
@@ -258,27 +259,57 @@
     const lineWidth = 8;
     const currentColor = "#ff0000";
 
-    // ----- pointer holati -----
-    let lastSentX = 0;
+    // ---- pointer holati (rasm-nisbiy koordinatalarda, 0..1) ----
+    let lastSentX = 0;   // normalized
     let lastSentY = 0;
-    let lastPointerX = 0;
+    let lastPointerX = 0; // normalized
     let lastPointerY = 0;
 
-    // ----- stroke state -----
     const myId = Math.random().toString(36).slice(2, 10);
-    const localSegments = new Map();
+    const localSegments = new Map();  // id -> normalized segment {x0,y0,x1,y1,c,w,u,t}
     const myStrokeIds = [];
     const undoStack = [];
     const MAX_UNDO = 100;
 
-    // ----- cursor sync -----
     const myCursorRef = ref(rtdb, "cursors/" + myId);
-    const remoteCursors = new Map(); // uid -> {el, dotEl, labelEl, x, y, t, color}
+    const remoteCursors = new Map();
     let lastCursorSend = 0;
-    const CURSOR_SEND_INTERVAL = 40; // ms
+    const CURSOR_SEND_INTERVAL = 40;
+
+    // ---- rasm maydonini hisoblash (object-fit: contain) ----
+    function getImageRect() {
+      const zoneRect = zone.getBoundingClientRect();
+      const zW = zoneRect.width;
+      const zH = zoneRect.height;
+      const nW = preview.naturalWidth || 1;
+      const nH = preview.naturalHeight || 1;
+      const scale = Math.min(zW / nW, zH / nH);
+      const w = nW * scale;
+      const h = nH * scale;
+      const left = (zW - w) / 2;
+      const top = (zH - h) / 2;
+      return { left, top, width: w, height: h };
+    }
+
+    // Ekran pikseli (canvas-relative) -> normalized (0..1) rasm ichida
+    function screenToNorm(px, py) {
+      const r = getImageRect();
+      return {
+        x: (px - r.left) / r.width,
+        y: (py - r.top) / r.height
+      };
+    }
+
+    // normalized -> ekran pikseli (canvas-relative)
+    function normToScreen(nx, ny) {
+      const r = getImageRect();
+      return {
+        x: r.left + nx * r.width,
+        y: r.top + ny * r.height
+      };
+    }
 
     function pickColor(seed) {
-      // barqaror rang uid asosida
       let h = 0;
       for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
       return `hsl(${h}, 85%, 60%)`;
@@ -346,35 +377,35 @@
       cursorPreview.style.top = `${y}px`;
     }
 
-    function drawSegment(s) {
+    function drawSegmentNorm(s) {
+      const a = normToScreen(s.x0, s.y0);
+      const b = normToScreen(s.x1, s.y1);
       ctx.strokeStyle = s.c;
       ctx.lineWidth = s.w;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(s.x0, s.y0);
-      ctx.lineTo(s.x1, s.y1);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
       ctx.stroke();
     }
 
     function redrawAll() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const s of localSegments.values()) drawSegment(s);
+      for (const s of localSegments.values()) drawSegmentNorm(s);
     }
 
-    // ----- kursorini serverga yuborish (throttled) -----
-    function sendCursor(x, y) {
+    function sendCursor(nx, ny) {
       const now = performance.now();
       if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
       lastCursorSend = now;
       rtdbUpdate(myCursorRef, {
-        x: Math.round(x),
-        y: Math.round(y),
+        x: +nx.toFixed(4),
+        y: +ny.toFixed(4),
         t: Date.now()
       }).catch(() => {});
     }
 
-    // ----- kursorini ekranda boshqarish (remote) -----
     function ensureRemoteCursor(uid) {
       let c = remoteCursors.get(uid);
       if (c) return c;
@@ -396,15 +427,16 @@
       el.appendChild(label);
 
       zone.appendChild(el);
-      c = { el, dotEl: dot, labelEl: label, x: 0, y: 0, t: 0 };
+      c = { el, dotEl: dot, labelEl: label, nx: 0, ny: 0, t: 0 };
       remoteCursors.set(uid, c);
       return c;
     }
 
-    function updateRemoteCursor(uid, x, y, t) {
+    function placeRemoteCursor(uid, nx, ny, t) {
       const c = ensureRemoteCursor(uid);
-      c.x = x; c.y = y; c.t = t;
-      c.el.style.transform = `translate(${x}px, ${y}px)`;
+      c.nx = nx; c.ny = ny; c.t = t;
+      const p = normToScreen(nx, ny);
+      c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
       c.el.classList.add("visible");
     }
 
@@ -415,24 +447,19 @@
       remoteCursors.delete(uid);
     }
 
-    // ----- kursorlarni kuzatish -----
     onValue(cursorsRoot, (snap) => {
       const data = snap.val() || {};
-      const now = Date.now();
-      // yangi/yangilangan
       for (const uid in data) {
         if (uid === myId) continue;
         const v = data[uid];
         if (!v) continue;
-        updateRemoteCursor(uid, v.x | 0, v.y | 0, v.t | 0);
+        placeRemoteCursor(uid, v.x, v.y, v.t);
       }
-      // yo'qolgan
       for (const uid of Array.from(remoteCursors.keys())) {
         if (!data[uid]) removeRemoteCursor(uid);
       }
     });
 
-    // eski kursorlarni tozalash (5s dan ortiq yangilanmagan)
     setInterval(() => {
       const now = Date.now();
       for (const [uid, c] of remoteCursors) {
@@ -440,10 +467,9 @@
       }
     }, 2000);
 
-    // o'zi chiqib ketganda kursorni o'chirish
     onDisconnect(myCursorRef).remove().catch(() => {});
     window.addEventListener("beforeunload", () => {
-      try { myCursorRef && remove(myCursorRef); } catch (e) {}
+      try { remove(myCursorRef); } catch (e) {}
     });
 
     function startDrawing(e) {
@@ -451,52 +477,56 @@
       e.preventDefault();
       isDrawing = true;
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      lastSentX = x;
-      lastSentY = y;
-      lastPointerX = x;
-      lastPointerY = y;
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const n = screenToNorm(px, py);
+      lastSentX = n.x;
+      lastSentY = n.y;
+      lastPointerX = n.x;
+      lastPointerY = n.y;
       cursorPreview.classList.add("active");
       updateCursorPosition(e);
-      sendCursor(x, y);
+      sendCursor(n.x, n.y);
     }
 
     function updateDrawing(e) {
       updateCursorPosition(e);
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const n = screenToNorm(px, py);
 
-      // kursor har doim yuboriladi (chizmasa ham)
-      sendCursor(x, y);
+      sendCursor(n.x, n.y);
 
       if (!isDrawing) return;
       e.preventDefault();
 
-      const dx = x - lastPointerX;
-      const dy = y - lastPointerY;
-      if (dx * dx + dy * dy < 4) return;
+      // yaqin nuqtalarni tashlab yuborish (normalized fazoda, ~2px ekvivalent)
+      const r = getImageRect();
+      const dxPx = (n.x - lastPointerX) * r.width;
+      const dyPx = (n.y - lastPointerY) * r.height;
+      if (dxPx * dxPx + dyPx * dyPx < 4) return;
 
+      // lokal chizish
+      const a = normToScreen(lastPointerX, lastPointerY);
+      const b = normToScreen(n.x, n.y);
       ctx.strokeStyle = currentColor;
       ctx.lineWidth = lineWidth;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(lastPointerX, lastPointerY);
-      ctx.lineTo(x, y);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
       ctx.stroke();
 
-      lastPointerX = x;
-      lastPointerY = y;
-
+      // serverga yuborish — normalized koordinatalarda
       const segRef = push(strokesRoot);
       const id = segRef.key;
       const payload = {
-        x0: lastSentX,
-        y0: lastSentY,
-        x1: x,
-        y1: y,
+        x0: +lastSentX.toFixed(4),
+        y0: +lastSentY.toFixed(4),
+        x1: +n.x.toFixed(4),
+        y1: +n.y.toFixed(4),
         c: currentColor,
         w: lineWidth,
         u: myId,
@@ -509,8 +539,10 @@
         console.error("push failed", err);
       });
 
-      lastSentX = x;
-      lastSentY = y;
+      lastPointerX = n.x;
+      lastPointerY = n.y;
+      lastSentX = n.x;
+      lastSentY = n.y;
     }
 
     function stopDrawing() {
@@ -565,7 +597,7 @@
       }
     });
 
-    // ----- Realtime sync: strokes -----
+    // ---- Realtime sync ----
     (async () => {
       try {
         const q = query(strokesRoot, limitToLast(5000));
@@ -590,7 +622,7 @@
       const s = child.val();
       if (!s) return;
       localSegments.set(id, s);
-      drawSegment(s);
+      drawSegmentNorm(s);
       if (s.u === myId) myStrokeIds.push(id);
     });
 
@@ -603,7 +635,6 @@
       redrawAll();
     });
 
-    // ----- rasm yuklash -----
     async function uploadOne(file) {
       if (!file || !file.type || !file.type.startsWith("image/")) {
         showStatus("Only images", true);
@@ -657,6 +688,11 @@
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       redrawAll();
+      // kursorlarni qayta joylash
+      for (const [uid, c] of remoteCursors) {
+        const p = normToScreen(c.nx, c.ny);
+        c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+      }
     }
 
     zone.addEventListener("dragover", (e) => {
@@ -707,6 +743,15 @@
     canvas.addEventListener("pointerleave", stopDrawing);
     canvas.addEventListener("pointerenter", () => cursorPreview.classList.add("active"));
     canvas.addEventListener("pointerleave", () => cursorPreview.classList.remove("active"));
+
+    // rasm yuklanishi tugagach qayta chizish va kursorlarni joylash
+    preview.addEventListener("load", () => {
+      redrawAll();
+      for (const [uid, c] of remoteCursors) {
+        const p = normToScreen(c.nx, c.ny);
+        c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+      }
+    });
 
     window.addEventListener("resize", resizeCanvas);
 
