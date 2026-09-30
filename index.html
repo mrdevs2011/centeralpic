@@ -196,7 +196,7 @@
       storageBucket: "centeralpic.firebasestorage.app",
       messagingSenderId: "294796721198",
       appId: "1:294796721198:web:ffb2bd139d31464687f3bf",
-      databaseURL: "https://centeralpic-default-rtdb.firebaseio.com"
+      databaseURL: "https://centeralpic-default-rtdb.europe-west1.firebasedatabase.app"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -223,8 +223,8 @@
 
     // ----- stroke state -----
     const myId = Math.random().toString(36).slice(2, 10);
-    const localSegments = new Map();   // id -> segment (serverda tasdiqlangan)
-    const myStrokeIds = [];            // mening chizganlarim (tartib bilan)
+    const localSegments = new Map();   // id -> segment
+    const myStrokeIds = [];            // mening chizganlarim
     const undoStack = [];              // batch'lar
     const MAX_UNDO = 100;
     let lastSendTime = 0;
@@ -375,7 +375,6 @@
         return;
       }
       const batch = undoStack.pop();
-      // faqat mening chiziqlarim
       const idsToRemove = batch.ids.filter((id) => {
         const seg = localSegments.get(id);
         return seg && seg.u === myId;
@@ -429,10 +428,7 @@
     // yangi segment (boshqalar yoki o'zim)
     onChildAdded(strokesRoot, (child) => {
       const id = child.key;
-      if (localSegments.has(id)) {
-        // allaqachon chizganmiz (lokal push)
-        return;
-      }
+      if (localSegments.has(id)) return;   // allaqachon chizganmiz
       const s = child.val();
       if (!s) return;
       localSegments.set(id, s);
