@@ -28,9 +28,19 @@ html,body{width:100%;height:100%;background:#0a0a0a;overflow:hidden;font-family:
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getDatabase, ref, set as rtdbSet, update as rtdbUpdate,
-  onValue, onChildAdded, onChildRemoved, onDisconnect
+  onValue, onChildAdded, onChildRemoved, onDisconnect, get, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
+const UA = navigator.userAgent;
+const isDesktop = matchMedia("(hover: hover) and (pointer: fine)").matches
+  && !/Android|iPhone|iPad|iPod|Mobi/i.test(UA)
+  && !(navigator.maxTouchPoints > 1 && /Macintosh/.test(UA));
+
+function blockScreen(text) {
+  document.body.innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:#a3a3a3;font:16px system-ui,sans-serif;background:#0a0a0a">' + text + '</div>';
+}
+
+async function startApp() {
 const firebaseConfig = {
   apiKey: "AIzaSyBoyos6hb4yq8FKXRKAtpwERDh6agaF5VU",
   authDomain: "centeralpic.firebaseapp.com",
@@ -47,6 +57,20 @@ const app = initializeApp(firebaseConfig);
 const rtdb = getDatabase(app);
 const imageRef = ref(rtdb, "image");
 const strokesRoot = ref(rtdb, "strokes");
+
+/* Ekran o'lchami hamma ishtirokchida bir xil bo'lishi shart */
+const SW = screen.width, SH = screen.height;
+try {
+  const off = (await get(ref(rtdb, ".info/serverTimeOffset"))).val() || 0;
+  const serverNow = Date.now() + off;
+  const pSnap = await get(ref(rtdb, `signaling/${ROOM}/peers`));
+  let mismatch = false;
+  pSnap.forEach((c) => {
+    const v = c.val();
+    if (v && v.sw && typeof v.t === "number" && serverNow - v.t < 30000 && (v.sw !== SW || v.sh !== SH)) mismatch = true;
+  });
+  if (mismatch) { blockScreen("Your screen size differs from the other participants.<br>This page can't be opened."); return; }
+} catch (e) {}
 
 const $ = (id) => document.getElementById(id);
 const zone = $("zone"), canvas = $("canvas");
@@ -205,7 +229,10 @@ onChildRemoved(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
   if (c) { c.el.remove(); remoteCursors.delete(id); }
 });
 
-rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: Date.now() }).catch(() => {});
+rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: serverTimestamp(), sw: SW, sh: SH }).catch(() => {});
+setInterval(() => {
+  rtdbUpdate(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: serverTimestamp() }).catch(() => {});
+}, 10000);
 onDisconnect(ref(rtdb, `signaling/${ROOM}/peers/${myId}`)).remove();
 onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
 
@@ -792,6 +819,10 @@ fileInput.addEventListener("change", () => {
 });
 
 resizeCanvas();
+}
+
+if (!isDesktop) blockScreen("Your device is not supported.<br>Open this page on a desktop computer.");
+else startApp();
 </script>
 </body>
 </html>
