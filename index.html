@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-  <title>CenteralPic</title>
-  <link rel="icon" href="data:,">
+  <title>Image</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M 100.44 100.44 A 220 220 0 1 1 100.44 411.56 L 142.86 369.14 A 160 160 0 1 0 142.86 142.86 Z M 340.85 171.15 A 120 120 0 1 0 340.85 340.85 L 298.43 298.43 A 60 60 0 1 1 298.43 213.57 Z' fill='%23ffffff'/%3E%3C/svg%3E">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -20,9 +20,6 @@
       width: 100%;
       height: 100%;
       position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       background: #0a0a0a;
       overflow: hidden;
       touch-action: none;
@@ -42,38 +39,6 @@
       0%, 100% { opacity: 0.45; }
       50% { opacity: 1; }
     }
-    #preview {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      object-position: center;
-      opacity: 0;
-      filter: blur(32px) brightness(0.8);
-      transform: scale(1.04);
-      transition:
-        opacity 0.08s linear,
-        filter 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-        transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-      will-change: opacity, filter, transform;
-    }
-    #preview.blur-in {
-      opacity: 1;
-      filter: blur(32px) brightness(0.8);
-      transform: scale(1.04);
-    }
-    #preview.sharp {
-      opacity: 1;
-      filter: blur(0) brightness(1);
-      transform: scale(1);
-    }
-    #preview.leaving {
-      opacity: 0;
-      filter: blur(20px);
-      transform: scale(1.02);
-      transition: opacity 0.2s ease, filter 0.2s ease, transform 0.2s ease;
-    }
     .hint {
       color: #525252;
       font-size: 0.95rem;
@@ -83,9 +48,14 @@
       transition: opacity 0.25s ease, color 0.2s ease;
       text-align: center;
       line-height: 1.6;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
     }
     .zone.has-image .hint { opacity: 0; }
     .zone.dragover .hint { color: #a3a3a3; }
+
     .loader {
       position: fixed;
       bottom: 0;
@@ -227,7 +197,6 @@
 <body>
   <div class="zone" id="zone">
     <p class="hint">Drop or Ctrl+V<br>Ctrl+Z — undo · pinch / scroll — zoom</p>
-    <img id="preview" src="" alt="">
     <input type="file" id="fileInput" accept="image/*">
     <canvas id="canvas"></canvas>
   </div>
@@ -285,7 +254,6 @@
     const cursorsRoot = ref(rtdb, "cursors");
 
     const zone = document.getElementById("zone");
-    const preview = document.getElementById("preview");
     const statusEl = document.getElementById("status");
     const loader = document.getElementById("loader");
     const canvas = document.getElementById("canvas");
@@ -297,12 +265,15 @@
     const lineWidth = 8;
     const currentColor = "#ff0000";
 
-    // ---- viewport ----
+    // ---- rasm holati ----
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    let imageReady = false;
+
     const view = { scale: 1, tx: 0, ty: 0 };
     const MIN_SCALE = 0.5;
     const MAX_SCALE = 8;
 
-    // ---- stroke holati (normalized 0..1) ----
     let lastSentX = 0;
     let lastSentY = 0;
     let lastPointerX = 0;
@@ -314,13 +285,11 @@
     const undoStack = [];
     const MAX_UNDO = 100;
 
-    // ---- cursor sync ----
     const myCursorRef = ref(rtdb, "cursors/" + myId);
     const remoteCursors = new Map();
     let lastCursorSend = 0;
     const CURSOR_SEND_INTERVAL = 40;
 
-    // ---- pointer tracking ----
     const activePointers = new Map();
     let isDrawing = false;
     let pinchStartDist = 0;
@@ -328,12 +297,15 @@
     let pinchStartCenter = { x: 0, y: 0 };
     let pinchStartView = { tx: 0, ty: 0 };
 
+    // ---- canvas o'lchamlari va DPR ----
+    let canvasW = 0, canvasH = 0;
+    let dpr = 1;
+
     function getImageRect() {
-      const zoneRect = zone.getBoundingClientRect();
-      const zW = zoneRect.width;
-      const zH = zoneRect.height;
-      const nW = preview.naturalWidth || 1;
-      const nH = preview.naturalHeight || 1;
+      const zW = canvasW;
+      const zH = canvasH;
+      const nW = image.naturalWidth || 1;
+      const nH = image.naturalHeight || 1;
       const scale = Math.min(zW / nW, zH / nH);
       const w = nW * scale;
       const h = nH * scale;
@@ -426,42 +398,52 @@
 
     function showImage(src) {
       if (!src) {
-        preview.classList.remove("sharp", "blur-in");
-        preview.classList.add("leaving");
-        setTimeout(() => {
-          preview.src = "";
-          preview.classList.remove("leaving");
-          zone.classList.remove("has-image");
-          currentSrc = "";
-        }, 200);
+        imageReady = false;
+        currentSrc = "";
+        zone.classList.remove("has-image");
+        redrawAll();
         return;
       }
       if (src === currentSrc) return;
-      const reveal = () => {
-        preview.src = src;
-        currentSrc = src;
+      currentSrc = src;
+      image.onload = () => {
+        imageReady = true;
         zone.classList.add("has-image");
-        preview.classList.remove("leaving", "sharp");
-        preview.classList.add("blur-in");
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            preview.classList.add("sharp");
-          });
-        });
+        applyView();
       };
-      if (preview.classList.contains("sharp") || preview.classList.contains("blur-in")) {
-        preview.classList.remove("sharp", "blur-in");
-        preview.classList.add("leaving");
-        setTimeout(reveal, 180);
-      } else {
-        reveal();
-      }
+      image.onerror = () => {
+        console.error("image load failed");
+        imageReady = false;
+        redrawAll();
+      };
+      image.src = src;
+    }
+
+    // ---- chizish ----
+    function drawImage() {
+      if (!imageReady) return;
+      const r = getImageRect();
+      // ekranga proyeksiya: view orqali
+      const x = r.left * view.scale + view.tx;
+      const y = r.top * view.scale + view.ty;
+      const w = r.width * view.scale;
+      const h = r.height * view.scale;
+      // rasm chegarasidan tashqariga chiqmaslik
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, canvasW, canvasH);
+      ctx.clip();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, x, y, w, h);
+      ctx.restore();
     }
 
     function drawSegmentNorm(s) {
       const a = normToScreen(s.x0, s.y0);
       const b = normToScreen(s.x1, s.y1);
       ctx.strokeStyle = s.c;
+      // chiziq qalinligi ham zoom bilan masshtablanadi — rasm bilan birga
       ctx.lineWidth = s.w * view.scale;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -472,10 +454,12 @@
     }
 
     function redrawAll() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvasW, canvasH);
+      drawImage();
       for (const s of localSegments.values()) drawSegmentNorm(s);
     }
 
+    // ---- cursor sync ----
     function sendCursor(nx, ny) {
       const now = performance.now();
       if (now - lastCursorSend < CURSOR_SEND_INTERVAL) return;
@@ -690,12 +674,10 @@
     }
 
     document.getElementById("zoomIn").addEventListener("click", () => {
-      const rect = canvas.getBoundingClientRect();
-      zoomAt(rect.width / 2, rect.height / 2, view.scale * 1.25);
+      zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25);
     });
     document.getElementById("zoomOut").addEventListener("click", () => {
-      const rect = canvas.getBoundingClientRect();
-      zoomAt(rect.width / 2, rect.height / 2, view.scale / 1.25);
+      zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25);
     });
     document.getElementById("zoomReset").addEventListener("click", resetView);
 
@@ -749,12 +731,10 @@
       const k = e.key;
       if (k === "0") resetView();
       if (k === "+" || k === "=") {
-        const rect = canvas.getBoundingClientRect();
-        zoomAt(rect.width / 2, rect.height / 2, view.scale * 1.25);
+        zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25);
       }
       if (k === "-" || k === "_") {
-        const rect = canvas.getBoundingClientRect();
-        zoomAt(rect.width / 2, rect.height / 2, view.scale / 1.25);
+        zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25);
       }
     });
 
@@ -822,7 +802,6 @@
         myStrokeIds.length = 0;
         undoStack.length = 0;
         resetView();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
         await rtdbSet(strokesRoot, null);
 
         if (token === localToken) {
@@ -840,11 +819,13 @@
 
     function resizeCanvas() {
       const zoneRect = zone.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(zoneRect.width * dpr);
-      canvas.height = Math.floor(zoneRect.height * dpr);
-      canvas.style.width = zoneRect.width + "px";
-      canvas.style.height = zoneRect.height + "px";
+      dpr = window.devicePixelRatio || 1;
+      canvasW = zoneRect.width;
+      canvasH = zoneRect.height;
+      canvas.width = Math.floor(canvasW * dpr);
+      canvas.height = Math.floor(canvasH * dpr);
+      canvas.style.width = canvasW + "px";
+      canvas.style.height = canvasH + "px";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -900,17 +881,6 @@
 
     ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
       document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
-    });
-
-    preview.addEventListener("load", () => {
-      redrawAll();
-      for (const [uid, c] of remoteCursors) {
-        const p = normToScreen(c.nx, c.ny);
-        c.el.style.transition = "none";
-        c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
-        void c.el.offsetWidth;
-        c.el.style.transition = "";
-      }
     });
 
     window.addEventListener("resize", resizeCanvas);
