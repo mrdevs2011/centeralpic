@@ -1,1357 +1,928 @@
 <!DOCTYPE html>
 <html lang="uz">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-  <title>CenteralPIC</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M 100.44 100.44 A 220 220 0 1 1 100.44 411.56 L 142.86 369.14 A 160 160 0 1 0 142.86 142.86 Z M 340.85 171.15 A 120 120 0 1 0 340.85 340.85 L 298.43 298.43 A 60 60 0 1 1 298.43 213.57 Z' fill='%23ffffff'/%3E%3C/svg%3E">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%; height: 100%;
-      background: #0a0a0a;
-      overflow: hidden;
-      font-family: system-ui, -apple-system, sans-serif;
-      touch-action: none; overscroll-behavior: none;
-    }
-    .zone { width: 100%; height: 100%; position: relative; background: #0a0a0a; overflow: hidden; touch-action: none; }
-    #canvas {
-      position: absolute; inset: 0; width: 100%; height: 100%;
-      pointer-events: auto; z-index: 3; display: block;
-      touch-action: none; cursor: crosshair;
-      opacity: 0;
-      filter: blur(24px) brightness(0.8);
-      transition: opacity 0.15s linear, filter 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-    }
-    #canvas.revealed { opacity: 1; filter: blur(0) brightness(1); }
-    #canvas.clearing { opacity: 0; filter: blur(16px) brightness(0.7); transition: opacity 0.25s ease, filter 0.25s ease; }
-    #canvas.panning { cursor: grabbing; }
-
-    .hint {
-      color: #525252; z-index: 1; pointer-events: none;
-      text-align: center; line-height: 1.6;
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      transition: opacity 0.25s ease;
-    }
-    .hint .brand { display: block; font-size: 1.6rem; font-weight: 600; color: #d4d4d4; letter-spacing: 0.04em; margin-bottom: 10px; }
-    .hint .brand .accent { color: #ff0000; }
-    .hint .sub { display: block; font-size: 0.9rem; color: #525252; }
-    .zone.has-image .hint { opacity: 0; }
-
-    .loader {
-      position: fixed; bottom: 0; left: 0; height: 2px; width: 0%;
-      background: linear-gradient(90deg, #333, #bbb, #333);
-      background-size: 200% 100%; z-index: 20; opacity: 0;
-      transition: opacity 0.15s ease;
-    }
-    .loader.active { opacity: 1; width: 100%; animation: shimmer 0.8s linear infinite; }
-    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-    #fileInput { display: none; }
-
-    .status {
-      position: fixed; bottom: 18px; left: 50%;
-      transform: translateX(-50%) translateY(6px);
-      padding: 7px 14px; border-radius: 8px;
-      font-size: 0.82rem; background: #1a1a1a; color: #d4d4d4;
-      border: 1px solid #333; opacity: 0;
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      z-index: 10; pointer-events: none;
-    }
-    .status.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .status.error { background: #1c1010; color: #f87171; border-color: #7f1d1d; }
-
-    .remote-cursor {
-      position: absolute; pointer-events: none; z-index: 25;
-      opacity: 0; will-change: transform;
-      left: 0; top: 0;
-      width: 32px; height: 32px; transform-origin: 0 0;
-      transition: opacity 150ms ease;
-    }
-    .remote-cursor.visible { opacity: 1; }
-    .remote-cursor svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 4px rgba(0,0,0,0.85)) drop-shadow(0 0 8px currentColor); }
-    .remote-cursor .label {
-      position: absolute; top: 24px; left: 26px;
-      font-size: 10px; padding: 2px 6px; border-radius: 4px;
-      background: rgba(0,0,0,0.75); color: #fff;
-      white-space: nowrap; font-family: ui-monospace, monospace;
-      border: 1px solid currentColor;
-    }
-
-    .zoom-badge {
-      position: fixed; top: 14px; left: 14px;
-      padding: 5px 10px; border-radius: 6px;
-      background: rgba(20,20,20,0.8); color: #a3a3a3;
-      border: 1px solid #333; font-size: 11px;
-      font-family: ui-monospace, monospace;
-      z-index: 40; user-select: none; pointer-events: none;
-      opacity: 0; transition: opacity 0.2s;
-    }
-    .zoom-badge.show { opacity: 1; }
-
-    .state-badge {
-      position: fixed; top: 14px; left: 78px;
-      padding: 5px 10px 5px 28px; border-radius: 6px;
-      background: rgba(20,20,20,0.8); color: #a3a3a3;
-      border: 1px solid #333; font-size: 11px;
-      font-family: ui-monospace, monospace;
-      z-index: 40; user-select: none; pointer-events: none;
-      opacity: 0; transition: opacity 0.2s;
-    }
-    .state-badge.show { opacity: 1; }
-    .state-badge::before {
-      content: ""; position: absolute; left: 8px; top: 50%;
-      width: 12px; height: 12px; border-radius: 50%;
-      transform: translateY(-50%);
-      background: var(--dot-color, #ff0000);
-      border: 1px solid #333;
-    }
-
-    .ping-badge {
-      position: fixed; top: 14px; right: 60px;
-      padding: 5px 10px; border-radius: 6px;
-      background: rgba(20,20,20,0.8); color: #22c55e;
-      border: 1px solid #333; font-size: 11px;
-      font-family: ui-monospace, monospace;
-      z-index: 40; user-select: none; pointer-events: none;
-      display: flex; gap: 6px; align-items: center;
-    }
-    .ping-badge.warn { color: #eab308; }
-    .ping-badge.bad { color: #ef4444; }
-    .ping-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-
-    .help-toggle {
-      position: fixed; top: 14px; right: 14px;
-      width: 36px; height: 36px; border-radius: 8px;
-      background: #1a1a1a; color: #d4d4d4;
-      border: 1px solid #333; font-size: 18px;
-      cursor: pointer; user-select: none;
-      display: flex; align-items: center; justify-content: center;
-      z-index: 50; font-family: ui-monospace, monospace;
-    }
-    .help-toggle:hover { background: #262626; }
-
-    .help-panel {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.88);
-      backdrop-filter: blur(6px);
-      z-index: 60; display: none;
-      overflow-y: auto; padding: 40px 20px;
-      opacity: 0; transition: opacity 0.2s ease;
-    }
-    .help-panel.open { display: block; opacity: 1; }
-    .help-content { max-width: 900px; margin: 0 auto; color: #d4d4d4; }
-    .help-content h1 { font-size: 1.6rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
-    .help-content h1 .accent { color: #ff0000; }
-    .help-content .sub { color: #737373; font-size: 0.85rem; margin-bottom: 30px; }
-    .help-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px;
-    }
-    .help-section { background: #141414; border: 1px solid #262626; border-radius: 10px; padding: 16px 18px; }
-    .help-section h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; color: #737373; margin-bottom: 12px; font-weight: 600; }
-    .help-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 0.85rem; border-bottom: 1px solid #1a1a1a; }
-    .help-row:last-child { border-bottom: none; }
-    .help-row .desc { color: #a3a3a3; }
-    .help-row kbd {
-      display: inline-block; padding: 2px 7px;
-      border-radius: 4px; background: #262626;
-      border: 1px solid #333; border-bottom-width: 2px;
-      font-family: ui-monospace, monospace;
-      font-size: 0.75rem; color: #e5e5e5; margin-left: 4px;
-    }
-    .help-close {
-      position: fixed; top: 14px; right: 14px;
-      width: 36px; height: 36px; border-radius: 8px;
-      background: #1a1a1a; color: #d4d4d4;
-      border: 1px solid #333; font-size: 18px;
-      cursor: pointer; z-index: 70; display: none;
-    }
-    .help-panel.open ~ .help-close { display: flex; align-items: center; justify-content: center; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>CenteralPIC</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M 100.44 100.44 A 220 220 0 1 1 100.44 411.56 L 142.86 369.14 A 160 160 0 1 0 142.86 142.86 Z M 340.85 171.15 A 120 120 0 1 0 340.85 340.85 L 298.43 298.43 A 60 60 0 1 1 298.43 213.57 Z' fill='%23ffffff'/%3E%3C/svg%3E">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;overflow:hidden;font-family:system-ui,-apple-system,sans-serif;touch-action:none;overscroll-behavior:none}
+.zone{width:100%;height:100%;position:relative;background:#0a0a0a;overflow:hidden;touch-action:none}
+#canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:auto;z-index:3;display:block;touch-action:none;cursor:crosshair;opacity:0;filter:blur(24px) brightness(.8);transition:opacity .15s linear,filter .6s cubic-bezier(.22,1,.36,1)}
+#canvas.revealed{opacity:1;filter:blur(0) brightness(1)}
+#canvas.clearing{opacity:0;filter:blur(16px) brightness(.7);transition:opacity .25s ease,filter .25s ease}
+#canvas.panning{cursor:grabbing}
+.hint{color:#525252;z-index:1;pointer-events:none;text-align:center;line-height:1.6;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);transition:opacity .25s ease}
+.hint .brand{display:block;font-size:1.6rem;font-weight:600;color:#d4d4d4;letter-spacing:.04em;margin-bottom:10px}
+.hint .brand .accent{color:#f00}
+.hint .sub{display:block;font-size:.9rem;color:#525252}
+.zone.has-image .hint{opacity:0}
+.loader{position:fixed;bottom:0;left:0;height:2px;width:0;background:linear-gradient(90deg,#333,#bbb,#333);background-size:200% 100%;z-index:20;opacity:0;transition:opacity .15s ease}
+.loader.active{opacity:1;width:100%;animation:shimmer .8s linear infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+#fileInput{display:none}
+.status{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(6px);padding:7px 14px;border-radius:8px;font-size:.82rem;background:#1a1a1a;color:#d4d4d4;border:1px solid #333;opacity:0;transition:opacity .2s ease,transform .2s ease;z-index:10;pointer-events:none}
+.status.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.status.error{background:#1c1010;color:#f87171;border-color:#7f1d1d}
+.remote-cursor{position:absolute;pointer-events:none;z-index:25;opacity:0;will-change:transform;left:0;top:0;width:32px;height:32px;transform-origin:0 0;transition:opacity 150ms ease}
+.remote-cursor.visible{opacity:1}
+.remote-cursor svg{width:100%;height:100%;display:block;filter:drop-shadow(0 0 4px rgba(0,0,0,.85)) drop-shadow(0 0 8px currentColor)}
+.remote-cursor .label{position:absolute;top:24px;left:26px;font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.75);color:#fff;white-space:nowrap;font-family:ui-monospace,monospace;border:1px solid currentColor}
+.zoom-badge,.state-badge,.ping-badge{position:fixed;top:14px;padding:5px 10px;border-radius:6px;background:rgba(20,20,20,.8);color:#a3a3a3;border:1px solid #333;font-size:11px;font-family:ui-monospace,monospace;z-index:40;user-select:none;pointer-events:none}
+.zoom-badge,.state-badge{opacity:0;transition:opacity .2s}
+.zoom-badge{left:14px}
+.state-badge{left:78px;padding-left:28px}
+.zoom-badge.show,.state-badge.show{opacity:1}
+.state-badge::before{content:"";position:absolute;left:8px;top:50%;width:12px;height:12px;border-radius:50%;transform:translateY(-50%);background:var(--dot-color,#f00);border:1px solid #333}
+.ping-badge{right:60px;color:#22c55e;display:flex;gap:6px;align-items:center}
+.ping-badge.warn{color:#eab308}
+.ping-badge.bad{color:#ef4444}
+.ping-badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.help-toggle,.help-close{position:fixed;top:14px;right:14px;width:36px;height:36px;border-radius:8px;background:#1a1a1a;color:#d4d4d4;border:1px solid #333;font-size:18px;cursor:pointer;font-family:ui-monospace,monospace}
+.help-toggle{user-select:none;display:flex;align-items:center;justify-content:center;z-index:50}
+.help-toggle:hover{background:#262626}
+.help-close{z-index:70;display:none}
+.help-panel{position:fixed;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);z-index:60;display:none;overflow-y:auto;padding:40px 20px;opacity:0;transition:opacity .2s ease}
+.help-panel.open{display:block;opacity:1}
+.help-panel.open ~ .help-close{display:flex;align-items:center;justify-content:center}
+.help-content{max-width:900px;margin:0 auto;color:#d4d4d4}
+.help-content h1{font-size:1.6rem;font-weight:600;color:#fff;margin-bottom:4px}
+.help-content h1 .accent{color:#f00}
+.help-content .sub{color:#737373;font-size:.85rem;margin-bottom:30px}
+.help-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.help-section{background:#141414;border:1px solid #262626;border-radius:10px;padding:16px 18px}
+.help-section h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.1em;color:#737373;margin-bottom:12px;font-weight:600}
+.help-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:.85rem;border-bottom:1px solid #1a1a1a}
+.help-row:last-child{border-bottom:none}
+.help-row .desc{color:#a3a3a3}
+.help-row kbd{display:inline-block;padding:2px 7px;border-radius:4px;background:#262626;border:1px solid #333;border-bottom-width:2px;font-family:ui-monospace,monospace;font-size:.75rem;color:#e5e5e5;margin-left:4px}
+</style>
 </head>
 <body>
-  <div class="zone" id="zone">
-    <p class="hint">
-      <span class="brand">Centeral<span class="accent">PIC</span></span>
-      <span class="sub">Drop or Ctrl+V<br>Press <kbd style="padding:1px 5px;border-radius:3px;background:#1a1a1a;border:1px solid #333;font-family:monospace;font-size:0.8em">?</kbd> for shortcuts</span>
-    </p>
-    <input type="file" id="fileInput" accept="image/*">
-    <canvas id="canvas"></canvas>
-  </div>
-
-  <div class="zoom-badge" id="zoomBadge">100%</div>
-  <div class="state-badge" id="stateBadge">#ff0000 · w8</div>
-  <div class="ping-badge" id="pingBadge"><span class="dot"></span><span id="pingText">—</span></div>
-  <div class="loader" id="loader"></div>
-  <div class="status" id="status"></div>
-
-  <button class="help-toggle" id="helpToggle" title="Shortcuts (?)">?</button>
-
-  <div class="help-panel" id="helpPanel">
-    <button class="help-close" id="helpClose">✕</button>
-    <div class="help-content">
-      <h1>Centeral<span class="accent">PIC</span> — Shortcuts</h1>
-      <p class="sub">BroadcastChannel (~0.5ms) + WebRTC P2P (~10ms) · Firebase RTDB (fallback ~100ms)</p>
-
-      <div class="help-grid">
-        <div class="help-section">
-          <h2>View</h2>
-          <div class="help-row"><span class="desc">Zoom in/out</span><span><kbd>+</kbd><kbd>-</kbd></span></div>
-          <div class="help-row"><span class="desc">Reset / Fit</span><span><kbd>0</kbd><kbd>1</kbd></span></div>
-          <div class="help-row"><span class="desc">200%</span><span><kbd>2</kbd></span></div>
-          <div class="help-row"><span class="desc">Pan</span><span><kbd>←↑↓→</kbd></span></div>
-          <div class="help-row"><span class="desc">Space+drag</span><span><kbd>Space</kbd></span></div>
-          <div class="help-row"><span class="desc">Pinch</span><span><kbd>2 barmoq</kbd></span></div>
-          <div class="help-row"><span class="desc">Fullscreen</span><span><kbd>F</kbd></span></div>
-        </div>
-
-        <div class="help-section">
-          <h2>Chizish</h2>
-          <div class="help-row"><span class="desc">Undo (global)</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
-          <div class="help-row"><span class="desc">Strokes clear</span><span><kbd>C</kbd></span></div>
-          <div class="help-row"><span class="desc">Image clear</span><span><kbd>Del</kbd>×2</span></div>
-          <div class="help-row"><span class="desc">Rang</span><span><kbd>E</kbd></span></div>
-          <div class="help-row"><span class="desc">Ingichka / qalin</span><span><kbd>[</kbd><kbd>]</kbd></span></div>
-        </div>
-
-        <div class="help-section">
-          <h2>Rasm</h2>
-          <div class="help-row"><span class="desc">Paste</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
-          <div class="help-row"><span class="desc">Fayl</span><span><kbd>O</kbd></span></div>
-          <div class="help-row"><span class="desc">Download</span><span><kbd>S</kbd></span></div>
-          <div class="help-row"><span class="desc">Info</span><span><kbd>I</kbd></span></div>
-        </div>
-
-        <div class="help-section">
-          <h2>Yordam</h2>
-          <div class="help-row"><span class="desc">Shortcuts</span><span><kbd>?</kbd><kbd>H</kbd></span></div>
-          <div class="help-row"><span class="desc">Yopish</span><span><kbd>Esc</kbd></span></div>
-        </div>
+<div class="zone" id="zone">
+  <p class="hint">
+    <span class="brand">Centeral<span class="accent">PIC</span></span>
+    <span class="sub">Drop or Ctrl+V<br>Press <kbd style="padding:1px 5px;border-radius:3px;background:#1a1a1a;border:1px solid #333;font-family:monospace;font-size:.8em">?</kbd> for shortcuts</span>
+  </p>
+  <input type="file" id="fileInput" accept="image/*">
+  <canvas id="canvas"></canvas>
+</div>
+<div class="zoom-badge" id="zoomBadge">100%</div>
+<div class="state-badge" id="stateBadge">#ff0000 · w8</div>
+<div class="ping-badge" id="pingBadge"><span class="dot"></span><span id="pingText">—</span></div>
+<div class="loader" id="loader"></div>
+<div class="status" id="status"></div>
+<button class="help-toggle" id="helpToggle" title="Shortcuts (?)">?</button>
+<div class="help-panel" id="helpPanel">
+  <div class="help-content">
+    <h1>Centeral<span class="accent">PIC</span> — Shortcuts</h1>
+    <p class="sub">BroadcastChannel (~0.5ms) + WebRTC P2P (~10ms) · Firebase RTDB (~100ms)</p>
+    <div class="help-grid">
+      <div class="help-section"><h2>View</h2>
+        <div class="help-row"><span class="desc">Zoom in/out</span><span><kbd>+</kbd><kbd>-</kbd></span></div>
+        <div class="help-row"><span class="desc">Reset / Fit</span><span><kbd>0</kbd><kbd>1</kbd></span></div>
+        <div class="help-row"><span class="desc">200%</span><span><kbd>2</kbd></span></div>
+        <div class="help-row"><span class="desc">Pan</span><span><kbd>←↑↓→</kbd></span></div>
+        <div class="help-row"><span class="desc">Space+drag</span><span><kbd>Space</kbd></span></div>
+        <div class="help-row"><span class="desc">Pinch</span><span><kbd>2 barmoq</kbd></span></div>
+        <div class="help-row"><span class="desc">Fullscreen</span><span><kbd>F</kbd></span></div>
+      </div>
+      <div class="help-section"><h2>Chizish</h2>
+        <div class="help-row"><span class="desc">Undo (global)</span><span><kbd>Ctrl</kbd>+<kbd>Z</kbd></span></div>
+        <div class="help-row"><span class="desc">Strokes clear</span><span><kbd>C</kbd></span></div>
+        <div class="help-row"><span class="desc">Image clear</span><span><kbd>Del</kbd>×2</span></div>
+        <div class="help-row"><span class="desc">Rang</span><span><kbd>E</kbd></span></div>
+        <div class="help-row"><span class="desc">Ingichka / qalin</span><span><kbd>[</kbd><kbd>]</kbd></span></div>
+      </div>
+      <div class="help-section"><h2>Rasm</h2>
+        <div class="help-row"><span class="desc">Paste</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd></span></div>
+        <div class="help-row"><span class="desc">Fayl</span><span><kbd>O</kbd></span></div>
+        <div class="help-row"><span class="desc">Download</span><span><kbd>S</kbd></span></div>
+        <div class="help-row"><span class="desc">Info</span><span><kbd>I</kbd></span></div>
+      </div>
+      <div class="help-section"><h2>Yordam</h2>
+        <div class="help-row"><span class="desc">Shortcuts</span><span><kbd>?</kbd><kbd>H</kbd></span></div>
+        <div class="help-row"><span class="desc">Yopish</span><span><kbd>Esc</kbd></span></div>
       </div>
     </div>
   </div>
+</div>
+<button class="help-close" id="helpClose">✕</button>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-    import {
-      getFirestore, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp
-    } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
-    import {
-      getDatabase, ref, set as rtdbSet, update as rtdbUpdate, remove,
-      onValue, onChildAdded, onDisconnect, query, limitToLast, get
-    } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+import {
+  getDatabase, ref, set as rtdbSet, update as rtdbUpdate,
+  onValue, onChildAdded, onChildRemoved, onDisconnect, query, limitToLast, get
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-    // ============================================================
-    // CONFIG
-    // ============================================================
-    const firebaseConfig = {
-      apiKey: "AIzaSyBoyos6hb4yq8FKXRKAtpwERDh6agaF5VU",
-      authDomain: "centeralpic.firebaseapp.com",
-      projectId: "centeralpic",
-      storageBucket: "centeralpic.firebasestorage.app",
-      messagingSenderId: "294796721198",
-      appId: "1:294796721198:web:ffb2bd139d31464687f3bf",
-      databaseURL: "https://centeralpic-default-rtdb.europe-west1.firebasedatabase.app"
-    };
+const firebaseConfig = {
+  apiKey: "AIzaSyBoyos6hb4yq8FKXRKAtpwERDh6agaF5VU",
+  authDomain: "centeralpic.firebaseapp.com",
+  projectId: "centeralpic",
+  storageBucket: "centeralpic.firebasestorage.app",
+  messagingSenderId: "294796721198",
+  appId: "1:294796721198:web:ffb2bd139d31464687f3bf",
+  databaseURL: "https://centeralpic-default-rtdb.europe-west1.firebasedatabase.app"
+};
+const ROOM = "centeralpic-main";
+const MAX_FILE_BYTES = 800 * 1024;
 
-    const ROOM = "centeralpic-main";
+const app = initializeApp(firebaseConfig);
+const rtdb = getDatabase(app);
+const imageRef = ref(rtdb, "image");
+const strokesRoot = ref(rtdb, "strokes");
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const rtdb = getDatabase(app);
-    const imageRef = doc(db, "app", "mainImage");
-    const strokesRoot = ref(rtdb, "strokes");
-    const signalingRoot = ref(rtdb, "signaling/" + ROOM);
+const $ = (id) => document.getElementById(id);
+const zone = $("zone"), statusEl = $("status"), loader = $("loader"), canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+const zoomBadge = $("zoomBadge"), stateBadge = $("stateBadge"), pingBadge = $("pingBadge"), pingText = $("pingText");
+const fileInput = $("fileInput"), helpPanel = $("helpPanel"), helpToggle = $("helpToggle"), helpClose = $("helpClose");
 
-    // ============================================================
-    // DOM
-    // ============================================================
-    const zone = document.getElementById("zone");
-    const statusEl = document.getElementById("status");
-    const loader = document.getElementById("loader");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const zoomBadge = document.getElementById("zoomBadge");
-    const stateBadge = document.getElementById("stateBadge");
-    const pingBadge = document.getElementById("pingBadge");
-    const pingText = document.getElementById("pingText");
-    const fileInput = document.getElementById("fileInput");
-    const helpPanel = document.getElementById("helpPanel");
-    const helpToggle = document.getElementById("helpToggle");
-    const helpClose = document.getElementById("helpClose");
+const COLORS = ["#ff0000", "#22c55e", "#3b82f6", "#eab308", "#ffffff", "#ec4899", "#f97316", "#a855f7"];
+const LINE_WIDTHS = [2, 4, 6, 8, 12, 16, 24];
+const state = { colorIndex: 0, widthIndex: 3, helpOpen: false };
+const currentColor = () => COLORS[state.colorIndex];
+const currentWidth = () => LINE_WIDTHS[state.widthIndex];
 
-    // ============================================================
-    // STATE
-    // ============================================================
-    const COLORS = ["#ff0000", "#22c55e", "#3b82f6", "#eab308", "#ffffff", "#ec4899", "#f97316", "#a855f7"];
-    const LINE_WIDTHS = [2, 4, 6, 8, 12, 16, 24];
+let currentSrc = "", localToken = 0;
+const image = new Image();
+image.crossOrigin = "anonymous";
+let imageReady = false, imageMeta = null;
 
-    const state = { colorIndex: 0, widthIndex: 3, helpOpen: false };
-    function currentColor() { return COLORS[state.colorIndex]; }
-    function currentWidth() { return LINE_WIDTHS[state.widthIndex]; }
+const view = { scale: 1, tx: 0, ty: 0 };
+const MIN_SCALE = 0.25, MAX_SCALE = 16;
+let isSpaceDown = false, isPanning = false;
+let panStartPointer = { x: 0, y: 0 }, panStartView = { tx: 0, ty: 0 };
+let lastSentX = 0, lastSentY = 0, lastPointerX = 0, lastPointerY = 0;
 
-    let currentSrc = "";
-    let localToken = 0;
+const myId = Math.random().toString(36).slice(2, 10);
+const localSegments = new Map();
+const remoteCursors = new Map();
+const activePointers = new Map();
+let isDrawing = false;
+let pinchStartDist = 0, pinchStartScale = 1;
+let pinchStartCenter = { x: 0, y: 0 }, pinchStartView = { tx: 0, ty: 0 };
+let canvasW = 0, canvasH = 0, dpr = 1;
+let lastDeleteTime = 0;
+const DELETE_DOUBLE_MS = 500;
 
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    let imageReady = false;
-    let imageMeta = null;
+/* ---------- Transport: BroadcastChannel + WebRTC + RTDB ---------- */
+const bc = ("BroadcastChannel" in window) ? new BroadcastChannel("centeralpic-" + ROOM) : null;
+if (bc) bc.onmessage = (e) => {
+  const msg = e.data;
+  if (!msg || msg.from === myId) return;
+  handleMessage(msg.from, msg);
+};
 
-    const view = { scale: 1, tx: 0, ty: 0 };
-    const MIN_SCALE = 0.25, MAX_SCALE = 16;
+const peers = new Map();
+const handledSdp = new Set(), handledIce = new Set();
+const ICE = { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:global.stun.twilio.com:3478" }
+] };
 
-    let isSpaceDown = false;
-    let isPanning = false;
-    let panStartPointer = { x: 0, y: 0 };
-    let panStartView = { tx: 0, ty: 0 };
-
-    let lastSentX = 0, lastSentY = 0;
-    let lastPointerX = 0, lastPointerY = 0;
-
-    const myId = Math.random().toString(36).slice(2, 10);
-    const localSegments = new Map();
-    const remoteCursors = new Map();
-
-    const activePointers = new Map();
-    let isDrawing = false;
-    let pinchStartDist = 0, pinchStartScale = 1;
-    let pinchStartCenter = { x: 0, y: 0 };
-    let pinchStartView = { tx: 0, ty: 0 };
-
-    let canvasW = 0, canvasH = 0, dpr = 1;
-    let lastDeleteTime = 0;
-    const DELETE_DOUBLE_MS = 500;
-
-    // ============================================================
-    // TRANSPORT LAYER
-    // Bir xil brauzerda: BroadcastChannel (~0.5ms)
-    // Turli qurilmalarda: WebRTC P2P (~10ms)
-    // Fallback: RTDB (~100ms)
-    // ============================================================
-
-    // --- 1. BroadcastChannel (same-browser, same-origin) ---
-    const bc = ("BroadcastChannel" in window) ? new BroadcastChannel("centeralpic-" + ROOM) : null;
-    if (bc) {
-      bc.onmessage = (e) => {
-        const msg = e.data;
-        if (!msg || msg.from === myId) return;
-        handleMessage(msg.from, msg);
-      };
+function createPeer(remoteId, initiator) {
+  if (peers.has(remoteId)) return peers.get(remoteId);
+  const pc = new RTCPeerConnection(ICE);
+  const entry = { pc, dc: null, connected: false, created: Date.now(), pend: [] };
+  peers.set(remoteId, entry);
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      const path = `signaling/${ROOM}/${remoteId}/ice/${myId}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      rtdbSet(ref(rtdb, path), e.candidate.toJSON()).catch(() => {});
     }
+  };
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "failed" || pc.connectionState === "closed") cleanupPeer(remoteId);
+  };
+  pc.ondatachannel = (e) => setupDataChannel(remoteId, e.channel);
+  if (initiator) {
+    const dc = pc.createDataChannel("d");
+    setupDataChannel(remoteId, dc);
+    pc.createOffer()
+      .then((offer) => pc.setLocalDescription(offer))
+      .then(() => rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}/sdp/${myId}`),
+        { type: pc.localDescription.type, sdp: pc.localDescription.sdp }).catch(() => {}))
+      .catch(() => cleanupPeer(remoteId));
+  }
+  return entry;
+}
 
-    // --- 2. WebRTC P2P mesh ---
-    const peers = new Map(); // peerId -> { pc, dc, connected, created }
-    const handledSdp = new Set();
-    const handledIce = new Set();
+function setupDataChannel(remoteId, dc) {
+  const entry = peers.get(remoteId);
+  if (!entry) return;
+  entry.dc = dc;
+  dc.onopen = () => { entry.connected = true; };
+  dc.onclose = () => { entry.connected = false; };
+  dc.onmessage = (e) => { try { handleMessage(remoteId, JSON.parse(e.data)); } catch (err) {} };
+}
 
-    const ICE = {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:global.stun.twilio.com:3478" }
-      ]
-    };
+function cleanupPeer(remoteId) {
+  const entry = peers.get(remoteId);
+  if (!entry) return;
+  try { entry.dc && entry.dc.close(); } catch (e) {}
+  try { entry.pc.close(); } catch (e) {}
+  peers.delete(remoteId);
+  rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}`), null).catch(() => {});
+}
 
-    function createPeer(remoteId, initiator) {
-      if (peers.has(remoteId)) return peers.get(remoteId);
-      const pc = new RTCPeerConnection(ICE);
-      const entry = { pc, dc: null, connected: false, created: Date.now() };
-      peers.set(remoteId, entry);
+async function flushPendingIce(entry) {
+  const list = entry.pend; entry.pend = [];
+  for (const c of list) { try { await entry.pc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {} }
+}
 
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          const path = `signaling/${ROOM}/${remoteId}/ice/${myId}/${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          rtdbSet(ref(rtdb, path), e.candidate.toJSON()).catch(() => {});
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          cleanupPeer(remoteId);
-        }
-      };
-
-      pc.ondatachannel = (e) => {
-        setupDataChannel(remoteId, e.channel);
-      };
-
-      if (initiator) {
-        const dc = pc.createDataChannel("d", { ordered: false, maxRetransmits: 0 });
-        setupDataChannel(remoteId, dc);
-        pc.createOffer()
-          .then((offer) => pc.setLocalDescription(offer))
-          .then(() => {
-            const path = `signaling/${ROOM}/${remoteId}/sdp/${myId}`;
-            rtdbSet(ref(rtdb, path), {
-              type: pc.localDescription.type,
-              sdp: pc.localDescription.sdp
-            }).catch(() => {});
-          })
-          .catch((err) => { console.error("offer", err); cleanupPeer(remoteId); });
-      }
-
-      return entry;
+async function handleRemoteSdp(fromId, sdp) {
+  const key = fromId + ":" + sdp.type + ":" + (sdp.sdp || "").slice(0, 40);
+  if (handledSdp.has(key)) return;
+  handledSdp.add(key);
+  const entry = peers.get(fromId) || createPeer(fromId, false);
+  const pc = entry.pc;
+  try {
+    if (sdp.type === "offer") {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      await flushPendingIce(entry);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await rtdbSet(ref(rtdb, `signaling/${ROOM}/${fromId}/sdp/${myId}`), { type: answer.type, sdp: answer.sdp });
+    } else if (sdp.type === "answer" && pc.signalingState === "have-local-offer") {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      await flushPendingIce(entry);
     }
+  } catch (err) { console.error("SDP err", err); }
+}
 
-    function setupDataChannel(remoteId, dc) {
-      const entry = peers.get(remoteId);
-      if (!entry) return;
-      entry.dc = dc;
-      dc.binaryType = "arraybuffer";
-      dc.onopen = () => { entry.connected = true; };
-      dc.onclose = () => { entry.connected = false; };
-      dc.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          handleMessage(remoteId, msg);
-        } catch (err) {}
-      };
-    }
+async function handleRemoteIce(fromId, cand, cid) {
+  const key = fromId + ":" + cid;
+  if (handledIce.has(key)) return;
+  handledIce.add(key);
+  const entry = peers.get(fromId) || createPeer(fromId, false);
+  if (!entry.pc.remoteDescription) { entry.pend.push(cand); return; }
+  try { await entry.pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (err) {}
+}
 
-    function cleanupPeer(remoteId) {
-      const entry = peers.get(remoteId);
-      if (!entry) return;
-      try { entry.dc && entry.dc.close(); } catch (e) {}
-      try { entry.pc.close(); } catch (e) {}
-      peers.delete(remoteId);
-      rtdbSet(ref(rtdb, `signaling/${ROOM}/${remoteId}`), null).catch(() => {});
-    }
+onValue(ref(rtdb, `signaling/${ROOM}/${myId}`), (snap) => {
+  const data = snap.val();
+  if (!data) return;
+  const sdpRoot = data.sdp || {};
+  for (const fromId in sdpRoot) {
+    const sdp = sdpRoot[fromId];
+    if (fromId !== myId && sdp && sdp.type) handleRemoteSdp(fromId, sdp);
+  }
+  const iceRoot = data.ice || {};
+  for (const fromId in iceRoot) {
+    if (fromId === myId) continue;
+    const cands = iceRoot[fromId] || {};
+    for (const cid in cands) handleRemoteIce(fromId, cands[cid], cid);
+  }
+});
 
-    async function handleRemoteSdp(fromId, sdp) {
-      const key = fromId + ":" + sdp.type + ":" + (sdp.sdp || "").slice(0, 40);
-      if (handledSdp.has(key)) return;
-      handledSdp.add(key);
+onChildAdded(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
+  const otherId = child.key;
+  if (otherId !== myId) createPeer(otherId, myId < otherId);
+});
 
-      let entry = peers.get(fromId);
-      if (!entry) entry = createPeer(fromId, false);
-      const pc = entry.pc;
+rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: Date.now() }).catch(() => {});
+onDisconnect(ref(rtdb, `signaling/${ROOM}/peers/${myId}`)).remove();
+onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
 
-      try {
-        if (sdp.type === "offer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          const path = `signaling/${ROOM}/${fromId}/sdp/${myId}`;
-          await rtdbSet(ref(rtdb, path), { type: answer.type, sdp: answer.sdp });
-        } else if (sdp.type === "answer") {
-          if (pc.signalingState === "have-local-offer") {
-            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-          }
-        }
-      } catch (err) { console.error("SDP err", err); }
-    }
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, e] of peers) if (!e.connected && now - e.created > 20000) cleanupPeer(id);
+}, 5000);
 
-    async function handleRemoteIce(fromId, cand, cid) {
-      const key = fromId + ":" + cid;
-      if (handledIce.has(key)) return;
-      handledIce.add(key);
-      let entry = peers.get(fromId);
-      if (!entry) entry = createPeer(fromId, false);
-      try {
-        await entry.pc.addIceCandidate(new RTCIceCandidate(cand));
-      } catch (err) {}
-    }
+/* RTDB strokes: sahifa ochilganda mavjudlarini yuklaydi + kafolatli sinxron */
+onChildAdded(strokesRoot, (child) => {
+  const s = child.val();
+  if (!s || localSegments.has(child.key)) return;
+  localSegments.set(child.key, s);
+  drawSegmentNorm(s);
+});
+onChildRemoved(strokesRoot, (child) => {
+  if (localSegments.delete(child.key)) redrawAll();
+});
 
-    // Signaling tinglash — menga qaratilgan
-    onValue(ref(rtdb, `signaling/${ROOM}/${myId}`), (snap) => {
-      const data = snap.val();
-      if (!data) return;
-      const sdpRoot = data.sdp || {};
-      for (const fromId in sdpRoot) {
-        if (fromId === myId) continue;
-        const sdp = sdpRoot[fromId];
-        if (!sdp || !sdp.type) continue;
-        handleRemoteSdp(fromId, sdp);
-      }
-      const iceRoot = data.ice || {};
-      for (const fromId in iceRoot) {
-        if (fromId === myId) continue;
-        const cands = iceRoot[fromId] || {};
-        for (const cid in cands) {
-          handleRemoteIce(fromId, cands[cid], cid);
-        }
-      }
-    });
+function send(msg) {
+  msg.from = myId;
+  if (bc) { try { bc.postMessage(msg); } catch (e) {} }
+  const str = JSON.stringify(msg);
+  for (const [, p] of peers) {
+    if (p.dc && p.dc.readyState === "open") { try { p.dc.send(str); } catch (e) {} }
+  }
+}
 
-    // Peers ro'yxati — kim birinchi bo'lsa initiator
-    onChildAdded(ref(rtdb, `signaling/${ROOM}/peers`), (child) => {
-      const otherId = child.key;
-      if (otherId === myId) return;
-      const initiator = myId < otherId;
-      createPeer(otherId, initiator);
-    });
-
-    // O'zimni ro'yxatga qo'shish
-    rtdbSet(ref(rtdb, `signaling/${ROOM}/peers/${myId}`), { t: Date.now() }).catch(() => {});
-    onDisconnect(ref(rtdb, `signaling/${ROOM}/peers/${myId}`)).remove();
-    onDisconnect(ref(rtdb, `signaling/${ROOM}/${myId}`)).remove();
-
-    // Eski peer'larni tozalash
-    setInterval(() => {
-      const now = Date.now();
-      for (const [id, e] of peers) {
-        if (!e.connected && now - e.created > 20000) cleanupPeer(id);
-      }
-    }, 5000);
-
-    // --- 3. RTDB fallback (peer bo'lmasa yoki broadcast ishlamasa) ---
-    // Strokes — initial load
-    (async () => {
-      try {
-        const q = query(strokesRoot, limitToLast(3000));
-        const snap = await get(q);
-        if (snap.exists()) {
-          snap.forEach((child) => {
-            const s = child.val();
-            if (!s) return;
-            localSegments.set(child.key, s);
-          });
-          redrawAll();
-        }
-      } catch (e) {}
-    })();
-
-    onChildAdded(strokesRoot, (child) => {
-      const id = child.key;
-      if (localSegments.has(id)) return;
-      const s = child.val();
-      if (!s) return;
-      localSegments.set(id, s);
+function handleMessage(fromId, msg) {
+  if (!msg || fromId === myId) return;
+  switch (msg.t) {
+    case "s": {
+      const s = msg.s;
+      if (!s || localSegments.has(s.id)) return;
+      localSegments.set(s.id, s);
       drawSegmentNorm(s);
-    });
-
-    // --- 4. Universal send ---
-    function send(msg) {
-      msg.from = myId;
-      // 1) BroadcastChannel — bir xil brauzerda lahzali
-      if (bc) {
-        try { bc.postMessage(msg); } catch (e) {}
-      }
-      // 2) WebRTC P2P — turli qurilmalar uchun tez
-      const str = JSON.stringify(msg);
-      let sentP2P = false;
-      for (const [id, p] of peers) {
-        if (p.dc && p.dc.readyState === "open") {
-          try { p.dc.send(str); sentP2P = true; } catch (e) {}
-        }
-      }
-      // 3) RTDB fallback — faqat muhim xabarlar uchun (stroke emas)
-      // Strokes uchun fallback ishlatilmaydi, chunki bu sekin.
-      return sentP2P;
+      break;
     }
+    case "u":
+      if (Array.isArray(msg.ids)) { for (const id of msg.ids) localSegments.delete(id); redrawAll(); }
+      break;
+    case "c":
+      localSegments.clear(); redrawAll();
+      break;
+    case "v":
+      if (Math.abs(msg.scale - view.scale) < 0.0005 && Math.abs(msg.tx - view.tx) < 0.5 && Math.abs(msg.ty - view.ty) < 0.5) return;
+      view.scale = msg.scale; view.tx = msg.tx; view.ty = msg.ty;
+      applyView();
+      break;
+    case "p": placeRemoteCursor(fromId, msg.x, msg.y); break;
+    case "st": applyRemoteState(msg); break;
+    case "ping": send({ t: "pong", ts: msg.ts, to: fromId }); break;
+    case "pong": if (msg.to === myId) updatePing(Date.now() - msg.ts); break;
+  }
+}
 
-    // ============================================================
-    // MESSAGE HANDLER — barcha transportlardan keladi
-    // ============================================================
-    function handleMessage(fromId, msg) {
-      if (!msg || fromId === myId) return;
+/* Chizuvchining o'zi segmentlarni RTDB'ga yozadi */
+let strokePersistQueue = [], strokePersistTimer = null;
+function scheduleStrokePersist(s) {
+  strokePersistQueue.push(s);
+  if (!strokePersistTimer) strokePersistTimer = setTimeout(flushStrokePersist, 120);
+}
+async function flushStrokePersist() {
+  strokePersistTimer = null;
+  const batch = strokePersistQueue.splice(0);
+  if (!batch.length) return;
+  const updates = {};
+  for (const s of batch) updates["strokes/" + s.id] = s;
+  try { await rtdbUpdate(ref(rtdb), updates); } catch (e) {}
+}
 
-      switch (msg.t) {
-        case "s": { // stroke
-          const s = msg.s;
-          if (!s || localSegments.has(s.id)) return;
-          localSegments.set(s.id, s);
-          drawSegmentNorm(s);
-          // RTDB'ga yozish — keyin qo'shilganlar uchun (throttled)
-          scheduleStrokePersist(s);
-          break;
-        }
-        case "u": { // undo — ids massiv
-          if (Array.isArray(msg.ids)) {
-            for (const id of msg.ids) localSegments.delete(id);
-            redrawAll();
-          }
-          break;
-        }
-        case "c": { // clear strokes
-          localSegments.clear();
-          redrawAll();
-          break;
-        }
-        case "v": { // view
-          if (
-            Math.abs(msg.scale - view.scale) < 0.0005 &&
-            Math.abs(msg.tx - view.tx) < 0.5 &&
-            Math.abs(msg.ty - view.ty) < 0.5
-          ) return;
-          view.scale = msg.scale;
-          view.tx = msg.tx;
-          view.ty = msg.ty;
-          applyView();
-          break;
-        }
-        case "p": { // cursor position
-          placeRemoteCursor(fromId, msg.x, msg.y);
-          break;
-        }
-        case "st": { // state (color, width, help)
-          applyRemoteState(msg);
-          break;
-        }
-        case "ping": {
-          send({ t: "pong", ts: msg.ts, to: fromId });
-          break;
-        }
-        case "pong": {
-          if (msg.to === myId) updatePing(Date.now() - msg.ts);
-          break;
-        }
-      }
-    }
+function updatePing(ms) {
+  pingText.textContent = ms + "ms";
+  pingBadge.classList.remove("warn", "bad");
+  if (ms > 60) pingBadge.classList.add("warn");
+  if (ms > 150) pingBadge.classList.add("bad");
+}
+setInterval(() => send({ t: "ping", ts: Date.now() }), 2000);
 
-    // ============================================================
-    // Stroke persistence (RTDB) — throttled, keyingi foydalanuvchilar uchun
-    // ============================================================
-    let strokePersistQueue = [];
-    let strokePersistTimer = null;
+/* ---------- Geometry / view ---------- */
+function getImageRect() {
+  const nW = image.naturalWidth || 1, nH = image.naturalHeight || 1;
+  const scale = Math.min(canvasW / nW, canvasH / nH);
+  const w = nW * scale, h = nH * scale;
+  return { left: (canvasW - w) / 2, top: (canvasH - h) / 2, width: w, height: h };
+}
+function screenToNorm(px, py) {
+  const cx = (px - view.tx) / view.scale, cy = (py - view.ty) / view.scale;
+  const r = getImageRect();
+  return { x: (cx - r.left) / r.width, y: (cy - r.top) / r.height };
+}
+function normToScreen(nx, ny) {
+  const r = getImageRect();
+  return { x: (r.left + nx * r.width) * view.scale + view.tx, y: (r.top + ny * r.height) * view.scale + view.ty };
+}
 
-    function scheduleStrokePersist(s) {
-      strokePersistQueue.push(s);
-      if (strokePersistTimer) return;
-      strokePersistTimer = setTimeout(flushStrokePersist, 200);
-    }
+function applyView() {
+  redrawAll();
+  for (const [, c] of remoteCursors) {
+    const p = normToScreen(c.nx, c.ny);
+    c.el.style.transition = "none";
+    c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+    void c.el.offsetWidth;
+    c.el.style.transition = "";
+  }
+  showZoomBadge();
+}
+function showZoomBadge() {
+  zoomBadge.textContent = Math.round(view.scale * 100) + "%";
+  zoomBadge.classList.add("show");
+  clearTimeout(showZoomBadge._t);
+  showZoomBadge._t = setTimeout(() => zoomBadge.classList.remove("show"), 1200);
+}
+function sendView() {
+  send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
+}
+function zoomAt(px, py, newScale, sync = true) {
+  newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+  const cx = (px - view.tx) / view.scale, cy = (py - view.ty) / view.scale;
+  view.scale = newScale;
+  view.tx = px - cx * newScale;
+  view.ty = py - cy * newScale;
+  applyView();
+  if (sync) sendView();
+}
+function resetView(sync = true) {
+  view.scale = 1; view.tx = 0; view.ty = 0;
+  applyView();
+  if (sync) sendView();
+}
+function panBy(dx, dy, sync = true) {
+  view.tx += dx; view.ty += dy;
+  applyView();
+  if (sync) sendView();
+}
 
-    async function flushStrokePersist() {
-      strokePersistTimer = null;
-      const batch = strokePersistQueue.splice(0);
-      if (!batch.length) return;
-      const updates = {};
-      for (const s of batch) {
-        updates["strokes/" + s.id] = s;
-      }
-      try {
-        await rtdbUpdate(ref(rtdb), updates);
-      } catch (e) {}
-    }
+/* ---------- State (color, width, help) ---------- */
+function updateStateBadge() {
+  stateBadge.textContent = `${currentColor()} · w${currentWidth()}`;
+  stateBadge.style.setProperty("--dot-color", currentColor());
+  stateBadge.classList.add("show");
+  clearTimeout(updateStateBadge._t);
+  updateStateBadge._t = setTimeout(() => stateBadge.classList.remove("show"), 1500);
+}
+function broadcastState() {
+  send({ t: "st", ci: state.colorIndex, wi: state.widthIndex, ho: state.helpOpen });
+}
+function applyRemoteState(msg) {
+  let changed = false;
+  if (typeof msg.ci === "number" && msg.ci !== state.colorIndex) { state.colorIndex = msg.ci; changed = true; }
+  if (typeof msg.wi === "number" && msg.wi !== state.widthIndex) { state.widthIndex = msg.wi; changed = true; }
+  if (typeof msg.ho === "boolean" && msg.ho !== state.helpOpen) {
+    state.helpOpen = msg.ho;
+    helpPanel.classList.toggle("open", msg.ho);
+    changed = true;
+  }
+  if (changed) updateStateBadge();
+}
 
-    // ============================================================
-    // Ping
-    // ============================================================
-    function updatePing(ms) {
-      pingText.textContent = ms + "ms";
-      pingBadge.classList.remove("warn", "bad");
-      if (ms > 60) pingBadge.classList.add("warn");
-      if (ms > 150) pingBadge.classList.add("bad");
-    }
+/* ---------- Cursors ---------- */
+const SVG_NS = "http://www.w3.org/2000/svg";
+function makeCursorSvg() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 512 512");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", "M 140 80 L 400 260 L 260 290 L 140 410 Z");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "32");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(path);
+  return svg;
+}
+function pickColor(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  return `hsl(${h}, 85%, 60%)`;
+}
+function ensureRemoteCursor(uid) {
+  let c = remoteCursors.get(uid);
+  if (c) return c;
+  const color = pickColor(uid);
+  const el = document.createElement("div");
+  el.className = "remote-cursor";
+  el.style.color = color;
+  el.appendChild(makeCursorSvg());
+  const label = document.createElement("div");
+  label.className = "label";
+  label.style.color = color;
+  label.textContent = uid;
+  el.appendChild(label);
+  zone.appendChild(el);
+  c = { el, nx: 0, ny: 0, t: 0 };
+  remoteCursors.set(uid, c);
+  return c;
+}
+function placeRemoteCursor(uid, nx, ny) {
+  const c = ensureRemoteCursor(uid);
+  c.nx = nx; c.ny = ny; c.t = Date.now();
+  const p = normToScreen(nx, ny);
+  c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
+  c.el.classList.add("visible");
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, c] of remoteCursors) {
+    if (now - c.t > 5000) { c.el.remove(); remoteCursors.delete(uid); }
+  }
+}, 2000);
 
-    setInterval(() => {
-      send({ t: "ping", ts: Date.now() });
-    }, 2000);
+/* ---------- Draw ---------- */
+function drawImage() {
+  if (!imageReady) return;
+  const r = getImageRect();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, canvasW, canvasH);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, r.left * view.scale + view.tx, r.top * view.scale + view.ty, r.width * view.scale, r.height * view.scale);
+  ctx.restore();
+}
+function strokeLine(a, b, color, width) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * view.scale;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+}
+function drawSegmentNorm(s) {
+  strokeLine(normToScreen(s.x0, s.y0), normToScreen(s.x1, s.y1), s.c, s.w);
+}
+function redrawAll() {
+  ctx.clearRect(0, 0, canvasW, canvasH);
+  drawImage();
+  for (const s of localSegments.values()) drawSegmentNorm(s);
+}
 
-    // ============================================================
-    // GEOMETRY
-    // ============================================================
-    function getImageRect() {
-      const nW = image.naturalWidth || 1;
-      const nH = image.naturalHeight || 1;
-      const scale = Math.min(canvasW / nW, canvasH / nH);
-      const w = nW * scale, h = nH * scale;
-      return { left: (canvasW - w) / 2, top: (canvasH - h) / 2, width: w, height: h };
-    }
-    function screenToNorm(px, py) {
-      const cx = (px - view.tx) / view.scale;
-      const cy = (py - view.ty) / view.scale;
-      const r = getImageRect();
-      return { x: (cx - r.left) / r.width, y: (cy - r.top) / r.height };
-    }
-    function normToScreen(nx, ny) {
-      const r = getImageRect();
-      return {
-        x: (r.left + nx * r.width) * view.scale + view.tx,
-        y: (r.top + ny * r.height) * view.scale + view.ty
-      };
-    }
+/* ---------- Image (RTDB: /image) ---------- */
+function showImage(src) {
+  if (!src) {
+    imageReady = false; currentSrc = ""; imageMeta = null;
+    zone.classList.remove("has-image");
+    canvas.classList.remove("revealed");
+    canvas.classList.add("clearing");
+    setTimeout(() => {
+      if (!imageReady) { canvas.classList.remove("revealed", "clearing"); redrawAll(); }
+    }, 300);
+    return;
+  }
+  if (src === currentSrc && imageReady) return;
+  canvas.classList.remove("revealed", "clearing");
+  imageReady = false;
+  currentSrc = src;
+  image.onload = () => {
+    imageReady = true;
+    zone.classList.add("has-image");
+    applyView();
+    requestAnimationFrame(() => requestAnimationFrame(() => canvas.classList.add("revealed")));
+  };
+  image.onerror = () => { imageReady = false; redrawAll(); };
+  image.src = src;
+}
 
-    // ============================================================
-    // VIEW
-    // ============================================================
-    function applyView() {
-      redrawAll();
-      for (const [uid, c] of remoteCursors) {
-        const p = normToScreen(c.nx, c.ny);
-        c.el.style.transition = "none";
-        c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
-        void c.el.offsetWidth;
-        c.el.style.transition = "";
-      }
-      showZoomBadge();
-    }
+onValue(imageRef, (snap) => {
+  const data = snap.val();
+  if (!data || !data.base64) { showImage(""); return; }
+  imageMeta = { name: data.name, size: data.size, type: data.type };
+  if (data.base64 === currentSrc && imageReady) return;
+  showImage(data.base64);
+}, (err) => console.error(err));
 
-    function showZoomBadge() {
-      zoomBadge.textContent = Math.round(view.scale * 100) + "%";
-      zoomBadge.classList.add("show");
-      clearTimeout(showZoomBadge._t);
-      showZoomBadge._t = setTimeout(() => zoomBadge.classList.remove("show"), 1200);
-    }
+/* ---------- Pointer ---------- */
+function getPinchCenter() {
+  const p = Array.from(activePointers.values());
+  return { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+}
+function getPinchDist() {
+  const p = Array.from(activePointers.values());
+  return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+}
 
-    function zoomAt(px, py, newScale, sync = true) {
-      newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
-      const cx = (px - view.tx) / view.scale;
-      const cy = (py - view.ty) / view.scale;
+function onPointerDown(e) {
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  activePointers.set(e.pointerId, { x: px, y: py });
+
+  if (isSpaceDown || e.button === 1) {
+    isPanning = true; isDrawing = false;
+    panStartPointer = { x: px, y: py };
+    panStartView = { tx: view.tx, ty: view.ty };
+    canvas.classList.add("panning");
+    return;
+  }
+  if (activePointers.size === 1) {
+    isDrawing = true;
+    const n = screenToNorm(px, py);
+    lastSentX = n.x; lastSentY = n.y; lastPointerX = n.x; lastPointerY = n.y;
+    send({ t: "p", x: n.x, y: n.y });
+  } else if (activePointers.size === 2) {
+    isDrawing = false; isPanning = true;
+    pinchStartDist = getPinchDist();
+    pinchStartScale = view.scale;
+    pinchStartCenter = getPinchCenter();
+    pinchStartView = { tx: view.tx, ty: view.ty };
+  }
+}
+
+function onPointerMove(e) {
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+
+  if (!activePointers.has(e.pointerId)) {
+    const n = screenToNorm(px, py);
+    send({ t: "p", x: n.x, y: n.y });
+    return;
+  }
+  activePointers.set(e.pointerId, { x: px, y: py });
+
+  if (isPanning && activePointers.size === 1) {
+    view.tx = panStartView.tx + (px - panStartPointer.x);
+    view.ty = panStartView.ty + (py - panStartPointer.y);
+    applyView();
+    sendView();
+    return;
+  }
+
+  if (activePointers.size >= 2) {
+    if (pinchStartDist > 0) {
+      const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, pinchStartScale * getPinchDist() / pinchStartDist));
+      const center = getPinchCenter();
+      const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
+      const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
       view.scale = newScale;
-      view.tx = px - cx * newScale;
-      view.ty = py - cy * newScale;
+      view.tx = center.x - cx * newScale;
+      view.ty = center.y - cy * newScale;
       applyView();
-      if (sync) send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
+      sendView();
     }
+    return;
+  }
 
-    function resetView(sync = true) {
-      view.scale = 1; view.tx = 0; view.ty = 0;
-      applyView();
-      if (sync) send({ t: "v", scale: 1, tx: 0, ty: 0 });
+  if (activePointers.size === 1 && isDrawing) {
+    const n = screenToNorm(px, py);
+    send({ t: "p", x: n.x, y: n.y });
+
+    const r = getImageRect();
+    const dxPx = (n.x - lastPointerX) * r.width * view.scale;
+    const dyPx = (n.y - lastPointerY) * r.height * view.scale;
+    if (dxPx * dxPx + dyPx * dyPx < 4) return;
+
+    strokeLine(normToScreen(lastPointerX, lastPointerY), normToScreen(n.x, n.y), currentColor(), currentWidth());
+
+    const id = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
+    const s = {
+      id,
+      x0: +lastSentX.toFixed(4), y0: +lastSentY.toFixed(4),
+      x1: +n.x.toFixed(4), y1: +n.y.toFixed(4),
+      c: currentColor(), w: currentWidth(), u: myId, t: Date.now()
+    };
+    localSegments.set(id, s);
+    send({ t: "s", s });
+    scheduleStrokePersist(s);
+
+    lastPointerX = n.x; lastPointerY = n.y;
+    lastSentX = n.x; lastSentY = n.y;
+  }
+}
+
+function onPointerUp(e) {
+  activePointers.delete(e.pointerId);
+  try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+  if (activePointers.size <= 1) { isDrawing = false; isPanning = false; pinchStartDist = 0; }
+  if (activePointers.size === 0) canvas.classList.remove("panning");
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  if (e.ctrlKey) zoomAt(px, py, view.scale * Math.exp(-e.deltaY * 0.01));
+  else panBy(-e.deltaX, -e.deltaY);
+}
+
+/* ---------- Undo / clear ---------- */
+let undoLock = false;
+async function globalUndo() {
+  if (undoLock) return;
+  undoLock = true;
+  try {
+    if (strokePersistTimer) clearTimeout(strokePersistTimer);
+    await flushStrokePersist();
+
+    const snap = await get(query(strokesRoot, limitToLast(2000)));
+    if (!snap.exists()) { undoLock = false; return; }
+    const arr = [];
+    snap.forEach((child) => { arr.push({ id: child.key, ...child.val() }); });
+    if (!arr.length) { undoLock = false; return; }
+
+    const last = arr[arr.length - 1];
+    const batch = [last];
+    const cutoff = (last.t || Date.now()) - 700;
+    for (let i = arr.length - 2; i >= 0; i--) {
+      const s = arr[i];
+      if (s.u !== last.u || (s.t || 0) < cutoff) break;
+      batch.push(s);
     }
+    const ids = batch.map((b) => b.id);
+    for (const id of ids) localSegments.delete(id);
+    redrawAll();
+    send({ t: "u", ids });
+    const updates = {};
+    for (const id of ids) updates["strokes/" + id] = null;
+    rtdbUpdate(ref(rtdb), updates).catch(() => {});
+  } catch (err) {}
+  undoLock = false;
+}
 
-    function panBy(dx, dy, sync = true) {
-      view.tx += dx; view.ty += dy;
-      applyView();
-      if (sync) send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
+function clearStrokes() {
+  strokePersistQueue = [];
+  if (strokePersistTimer) { clearTimeout(strokePersistTimer); strokePersistTimer = null; }
+  localSegments.clear();
+  redrawAll();
+  send({ t: "c" });
+  rtdbSet(strokesRoot, null).catch(() => {});
+}
+
+async function clearImage() {
+  try { await rtdbSet(imageRef, null); } catch (e) {}
+  clearStrokes();
+  resetView(true);
+}
+
+/* ---------- Helpers ---------- */
+function showStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.className = "status show" + (isError ? " error" : "");
+  clearTimeout(showStatus._t);
+  showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1200);
+}
+const setLoader = (on) => loader.classList.toggle("active", !!on);
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+function setHelp(open) {
+  state.helpOpen = open;
+  helpPanel.classList.toggle("open", open);
+  broadcastState();
+}
+const toggleHelp = () => setHelp(!state.helpOpen);
+const hideHelp = () => setHelp(false);
+
+/* ---------- Upload (RTDB: /image) ---------- */
+async function uploadOne(file) {
+  if (!file || !file.type || !file.type.startsWith("image/")) { showStatus("Only images", true); return; }
+  if (file.size > MAX_FILE_BYTES) { showStatus("Max 800 KB", true); return; }
+  const token = ++localToken;
+  const prevSrc = currentSrc;
+  try {
+    setLoader(true);
+    const base64 = await fileToBase64(file);
+    showImage(base64);
+    await rtdbSet(imageRef, {
+      base64,
+      name: file.name || "paste-" + Date.now() + ".png",
+      type: file.type,
+      size: file.size,
+      t: Date.now()
+    });
+    imageMeta = { name: file.name || "pasted", size: file.size };
+    clearStrokes();
+    resetView(true);
+    if (token === localToken) { setLoader(false); showStatus("Saved"); }
+  } catch (err) {
+    console.error(err);
+    if (token === localToken) {
+      setLoader(false);
+      showStatus(err.message || "Error", true);
+      if (prevSrc) showImage(prevSrc);
     }
+  }
+}
 
-    // ============================================================
-    // STATE (color, width, help)
-    // ============================================================
-    function updateStateBadge() {
-      stateBadge.textContent = `${currentColor()} · w${currentWidth()}`;
-      stateBadge.style.setProperty("--dot-color", currentColor());
-      stateBadge.classList.add("show");
-      clearTimeout(updateStateBadge._t);
-      updateStateBadge._t = setTimeout(() => stateBadge.classList.remove("show"), 1500);
-    }
+function downloadImage() {
+  if (!imageReady) { showStatus("No image", true); return; }
+  const a = document.createElement("a");
+  a.href = currentSrc;
+  a.download = (imageMeta && imageMeta.name) || "CenteralPIC.png";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showStatus("Downloaded");
+}
+function showImageInfo() {
+  if (!imageReady) { showStatus("No image", true); return; }
+  const size = imageMeta && imageMeta.size ? Math.round(imageMeta.size / 1024) + " KB" : "—";
+  const name = (imageMeta && imageMeta.name) || "pasted";
+  showStatus(`${name} · ${image.naturalWidth}×${image.naturalHeight} · ${size} · ${Math.round(view.scale * 100)}%`);
+}
 
-    function broadcastState() {
-      send({
-        t: "st",
-        ci: state.colorIndex,
-        wi: state.widthIndex,
-        ho: state.helpOpen
-      });
-    }
+function resizeCanvas() {
+  const r = zone.getBoundingClientRect();
+  dpr = window.devicePixelRatio || 1;
+  canvasW = r.width; canvasH = r.height;
+  canvas.width = Math.floor(canvasW * dpr);
+  canvas.height = Math.floor(canvasH * dpr);
+  canvas.style.width = canvasW + "px";
+  canvas.style.height = canvasH + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  applyView();
+}
 
-    function applyRemoteState(msg) {
-      let changed = false;
-      if (typeof msg.ci === "number" && msg.ci !== state.colorIndex) {
-        state.colorIndex = msg.ci; changed = true;
-      }
-      if (typeof msg.wi === "number" && msg.wi !== state.widthIndex) {
-        state.widthIndex = msg.wi; changed = true;
-      }
-      if (typeof msg.ho === "boolean" && msg.ho !== state.helpOpen) {
-        state.helpOpen = msg.ho;
-        if (msg.ho) helpPanel.classList.add("open");
-        else helpPanel.classList.remove("open");
-        changed = true;
-      }
-      if (changed) updateStateBadge();
-    }
-
-    // ============================================================
-    // CURSOR
-    // ============================================================
-    const CURSOR_SVG_NS = "http://www.w3.org/2000/svg";
-    const CURSOR_PATH_D = "M 140 80 L 400 260 L 260 290 L 140 410 Z";
-
-    function makeCursorSvg() {
-      const svg = document.createElementNS(CURSOR_SVG_NS, "svg");
-      svg.setAttribute("viewBox", "0 0 512 512");
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      const path = document.createElementNS(CURSOR_SVG_NS, "path");
-      path.setAttribute("d", CURSOR_PATH_D);
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "32");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      return svg;
-    }
-
-    function pickColor(seed) {
-      let h = 0;
-      for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
-      return `hsl(${h}, 85%, 60%)`;
-    }
-
-    function ensureRemoteCursor(uid) {
-      let c = remoteCursors.get(uid);
-      if (c) return c;
-      const color = pickColor(uid);
-      const el = document.createElement("div");
-      el.className = "remote-cursor";
-      el.style.color = color;
-      el.appendChild(makeCursorSvg());
-      const label = document.createElement("div");
-      label.className = "label";
-      label.style.color = color;
-      label.textContent = uid;
-      el.appendChild(label);
-      zone.appendChild(el);
-      c = { el, nx: 0, ny: 0, t: 0 };
-      remoteCursors.set(uid, c);
-      return c;
-    }
-
-    function placeRemoteCursor(uid, nx, ny) {
-      const c = ensureRemoteCursor(uid);
-      c.nx = nx; c.ny = ny; c.t = Date.now();
-      const p = normToScreen(nx, ny);
-      c.el.style.transform = `translate(${p.x}px, ${p.y}px)`;
-      c.el.classList.add("visible");
-    }
-
-    function removeRemoteCursor(uid) {
-      const c = remoteCursors.get(uid);
-      if (!c) return;
-      c.el.remove();
-      remoteCursors.delete(uid);
-    }
-
-    setInterval(() => {
-      const now = Date.now();
-      for (const [uid, c] of remoteCursors) {
-        if (now - c.t > 5000) removeRemoteCursor(uid);
-      }
-    }, 2000);
-
-    // ============================================================
-    // DRAW
-    // ============================================================
-    function drawImage() {
-      if (!imageReady) return;
-      const r = getImageRect();
-      const x = r.left * view.scale + view.tx;
-      const y = r.top * view.scale + view.ty;
-      const w = r.width * view.scale;
-      const h = r.height * view.scale;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, canvasW, canvasH);
-      ctx.clip();
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(image, x, y, w, h);
-      ctx.restore();
-    }
-
-    function drawSegmentNorm(s) {
-      const a = normToScreen(s.x0, s.y0);
-      const b = normToScreen(s.x1, s.y1);
-      ctx.strokeStyle = s.c;
-      ctx.lineWidth = s.w * view.scale;
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
-
-    function redrawAll() {
-      ctx.clearRect(0, 0, canvasW, canvasH);
-      drawImage();
-      for (const s of localSegments.values()) drawSegmentNorm(s);
-    }
-
-    // ============================================================
-    // IMAGE
-    // ============================================================
-    function showImage(src) {
-      if (!src) {
-        imageReady = false;
-        currentSrc = "";
-        imageMeta = null;
-        zone.classList.remove("has-image");
-        canvas.classList.remove("revealed");
-        canvas.classList.add("clearing");
-        setTimeout(() => {
-          if (!imageReady) { canvas.classList.remove("revealed", "clearing"); redrawAll(); }
-        }, 300);
-        return;
-      }
-      if (src === currentSrc && imageReady) return;
-      canvas.classList.remove("revealed", "clearing");
-      imageReady = false;
-      currentSrc = src;
-      image.onload = () => {
-        imageReady = true;
-        zone.classList.add("has-image");
-        applyView();
-        requestAnimationFrame(() => requestAnimationFrame(() => canvas.classList.add("revealed")));
-      };
-      image.onerror = () => { imageReady = false; redrawAll(); };
-      image.src = src;
-    }
-
-    onSnapshot(imageRef, { includeMetadataChanges: false }, (snap) => {
-      if (!snap.exists()) { showImage(""); return; }
-      const data = snap.data();
-      if (!data || !data.base64) { showImage(""); return; }
-      imageMeta = { name: data.name, size: data.size, type: data.type };
-      if (data.base64 === currentSrc && imageReady) return;
-      showImage(data.base64);
-    }, (err) => { console.error(err); });
-
-    // ============================================================
-    // POINTER
-    // ============================================================
-    function getPinchCenter() {
-      const pts = Array.from(activePointers.values());
-      return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-    }
-    function getPinchDist() {
-      const pts = Array.from(activePointers.values());
-      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-    }
-
-    function onPointerDown(e) {
-      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      activePointers.set(e.pointerId, { x: px, y: py });
-
-      if (isSpaceDown || e.button === 1) {
-        isPanning = true; isDrawing = false;
-        panStartPointer = { x: px, y: py };
-        panStartView = { tx: view.tx, ty: view.ty };
-        canvas.classList.add("panning");
-        return;
-      }
-
-      if (activePointers.size === 1) {
-        isDrawing = true;
-        const n = screenToNorm(px, py);
-        lastSentX = n.x; lastSentY = n.y;
-        lastPointerX = n.x; lastPointerY = n.y;
-        send({ t: "p", x: n.x, y: n.y });
-      } else if (activePointers.size === 2) {
-        isDrawing = false; isPanning = true;
-        pinchStartDist = getPinchDist();
-        pinchStartScale = view.scale;
-        pinchStartCenter = getPinchCenter();
-        pinchStartView = { tx: view.tx, ty: view.ty };
-      }
-    }
-
-    function onPointerMove(e) {
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-
-      if (!activePointers.has(e.pointerId)) {
-        const n = screenToNorm(px, py);
-        send({ t: "p", x: n.x, y: n.y });
-        return;
-      }
-      activePointers.set(e.pointerId, { x: px, y: py });
-
-      if (isPanning && activePointers.size === 1) {
-        const dx = px - panStartPointer.x;
-        const dy = py - panStartPointer.y;
-        view.tx = panStartView.tx + dx;
-        view.ty = panStartView.ty + dy;
-        applyView();
-        send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
-        return;
-      }
-
-      if (activePointers.size >= 2) {
-        const dist = getPinchDist();
-        if (pinchStartDist > 0) {
-          const ratio = dist / pinchStartDist;
-          let newScale = pinchStartScale * ratio;
-          newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
-          const center = getPinchCenter();
-          const cx = (pinchStartCenter.x - pinchStartView.tx) / pinchStartScale;
-          const cy = (pinchStartCenter.y - pinchStartView.ty) / pinchStartScale;
-          view.scale = newScale;
-          view.tx = center.x - cx * newScale;
-          view.ty = center.y - cy * newScale;
-          applyView();
-          send({ t: "v", scale: +view.scale.toFixed(4), tx: +view.tx.toFixed(2), ty: +view.ty.toFixed(2) });
-        }
-        return;
-      }
-
-      if (activePointers.size === 1 && isDrawing) {
-        const n = screenToNorm(px, py);
-        send({ t: "p", x: n.x, y: n.y });
-
-        const r = getImageRect();
-        const dxPx = (n.x - lastPointerX) * r.width * view.scale;
-        const dyPx = (n.y - lastPointerY) * r.height * view.scale;
-        if (dxPx * dxPx + dyPx * dyPx < 4) return;
-
-        // lokal chizish
-        const a = normToScreen(lastPointerX, lastPointerY);
-        const b = normToScreen(n.x, n.y);
-        ctx.strokeStyle = currentColor();
-        ctx.lineWidth = currentWidth() * view.scale;
-        ctx.lineJoin = "round";
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-
-        // segment
-        const id = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6);
-        const s = {
-          id,
-          x0: +lastSentX.toFixed(4),
-          y0: +lastSentY.toFixed(4),
-          x1: +n.x.toFixed(4),
-          y1: +n.y.toFixed(4),
-          c: currentColor(),
-          w: currentWidth(),
-          u: myId,
-          t: Date.now()
-        };
-        localSegments.set(id, s);
-
-        // barcha transportlar orqali yuborish
-        send({ t: "s", s });
-
-        lastPointerX = n.x; lastPointerY = n.y;
-        lastSentX = n.x; lastSentY = n.y;
-      }
-    }
-
-    function onPointerUp(e) {
-      activePointers.delete(e.pointerId);
-      try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-      if (activePointers.size === 0) {
-        isDrawing = false; isPanning = false;
-        pinchStartDist = 0;
-        canvas.classList.remove("panning");
-      } else if (activePointers.size === 1) {
-        isDrawing = false; isPanning = false;
-        pinchStartDist = 0;
-      }
-    }
-
-    function onWheel(e) {
+/* ---------- Events ---------- */
+zone.addEventListener("dragover", (e) => e.preventDefault());
+zone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) uploadOne(f);
+});
+document.addEventListener("paste", (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      if (e.ctrlKey) {
-        const factor = Math.exp(-e.deltaY * 0.01);
-        zoomAt(px, py, view.scale * factor);
-      } else {
-        panBy(-e.deltaX, -e.deltaY);
-      }
-    }
-
-    // ============================================================
-    // GLOBAL UNDO
-    // ============================================================
-    let undoLock = false;
-    async function globalUndo() {
-      if (undoLock) return;
-      undoLock = true;
-      try {
-        const q = query(strokesRoot, limitToLast(2000));
-        const snap = await get(q);
-        if (!snap.exists()) { undoLock = false; return; }
-        const arr = [];
-        snap.forEach((child) => arr.push({ id: child.key, ...child.val() }));
-        if (!arr.length) { undoLock = false; return; }
-
-        const last = arr[arr.length - 1];
-        const batch = [last];
-        const cutoff = (last.t || Date.now()) - 700;
-        for (let i = arr.length - 2; i >= 0; i--) {
-          const s = arr[i];
-          if (s.u !== last.u) break;
-          if ((s.t || 0) < cutoff) break;
-          batch.push(s);
-        }
-
-        const ids = batch.map((b) => b.id);
-        for (const id of ids) localSegments.delete(id);
-        redrawAll();
-
-        // P2P + BC
-        send({ t: "u", ids });
-        // RTDB fallback
-        const updates = {};
-        for (const id of ids) updates["strokes/" + id] = null;
-        rtdbUpdate(ref(rtdb), updates).catch(() => {});
-      } catch (err) {}
-      undoLock = false;
-    }
-
-    // ============================================================
-    // CLEAR
-    // ============================================================
-    function clearStrokes() {
-      localSegments.clear();
-      redrawAll();
-      send({ t: "c" });
-      rtdbSet(strokesRoot, null).catch(() => {});
-    }
-
-    async function clearImage() {
-      try { await deleteDoc(imageRef); } catch (e) {}
-      clearStrokes();
-      resetView(true);
-    }
-
-    // ============================================================
-    // HELPERS
-    // ============================================================
-    function showStatus(msg, isError = false) {
-      statusEl.textContent = msg;
-      statusEl.className = "status show" + (isError ? " error" : "");
-      clearTimeout(showStatus._t);
-      showStatus._t = setTimeout(() => { statusEl.className = "status"; }, 1200);
-    }
-    function setLoader(on) { loader.classList.toggle("active", !!on); }
-    function fileToBase64(file) {
-      return new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result);
-        r.onerror = rej;
-        r.readAsDataURL(file);
-      });
-    }
-
-    function showHelp() { state.helpOpen = true; helpPanel.classList.add("open"); broadcastState(); }
-    function hideHelp() { state.helpOpen = false; helpPanel.classList.remove("open"); broadcastState(); }
-    function toggleHelp() {
-      state.helpOpen = !state.helpOpen;
-      helpPanel.classList.toggle("open", state.helpOpen);
-      broadcastState();
-    }
-
-    // ============================================================
-    // UPLOAD
-    // ============================================================
-    async function uploadOne(file) {
-      if (!file || !file.type || !file.type.startsWith("image/")) {
-        showStatus("Only images", true); return;
-      }
-      if (file.size > 800 * 1024) { showStatus("Max 800 KB", true); return; }
-      const token = ++localToken;
-      try {
-        setLoader(true);
-        const base64 = await fileToBase64(file);
-        showImage(base64);
-        await setDoc(imageRef, {
-          base64,
-          name: file.name || "paste-" + Date.now() + ".png",
-          type: file.type,
-          size: file.size,
-          updatedAt: serverTimestamp(),
-          t: Date.now()
-        });
-        imageMeta = { name: file.name || "pasted", size: file.size };
-        clearStrokes();
-        resetView(true);
-        if (token === localToken) { setLoader(false); showStatus("Saved"); }
-      } catch (err) {
-        console.error(err);
-        if (token === localToken) { setLoader(false); showStatus(err.message || "Error", true); }
-      }
-    }
-
-    // ============================================================
-    // DOWNLOAD / INFO
-    // ============================================================
-    function downloadImage() {
-      if (!imageReady) { showStatus("No image", true); return; }
-      const a = document.createElement("a");
-      a.href = currentSrc;
-      a.download = (imageMeta && imageMeta.name) || "CenteralPIC.png";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      showStatus("Downloaded");
-    }
-
-    function showImageInfo() {
-      if (!imageReady) { showStatus("No image", true); return; }
-      const nW = image.naturalWidth, nH = image.naturalHeight;
-      const size = imageMeta && imageMeta.size ? Math.round(imageMeta.size / 1024) + " KB" : "—";
-      const name = (imageMeta && imageMeta.name) || "pasted";
-      showStatus(`${name} · ${nW}×${nH} · ${size} · ${Math.round(view.scale * 100)}%`);
-    }
-
-    // ============================================================
-    // RESIZE
-    // ============================================================
-    function resizeCanvas() {
-      const r = zone.getBoundingClientRect();
-      dpr = window.devicePixelRatio || 1;
-      canvasW = r.width; canvasH = r.height;
-      canvas.width = Math.floor(canvasW * dpr);
-      canvas.height = Math.floor(canvasH * dpr);
-      canvas.style.width = canvasW + "px";
-      canvas.style.height = canvasH + "px";
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      applyView();
-    }
-
-    // ============================================================
-    // EVENTS
-    // ============================================================
-    zone.addEventListener("dragover", (e) => e.preventDefault());
-    zone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const f = e.dataTransfer.files[0];
+      const f = item.getAsFile();
       if (f) uploadOne(f);
-    });
+      return;
+    }
+  }
+});
 
-    document.addEventListener("paste", (e) => {
-      const items = e.clipboardData && e.clipboardData.items;
-      if (!items) return;
-      for (const item of items) {
-        if (item.type.startsWith("image/")) {
-          e.preventDefault();
-          const f = item.getAsFile();
-          if (f) uploadOne(f);
-          return;
-        }
-      }
-    });
+canvas.addEventListener("pointerdown", onPointerDown);
+canvas.addEventListener("pointermove", onPointerMove);
+canvas.addEventListener("pointerup", onPointerUp);
+canvas.addEventListener("pointercancel", onPointerUp);
+canvas.addEventListener("wheel", onWheel, { passive: false });
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
+  document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+});
+window.addEventListener("resize", resizeCanvas);
+window.addEventListener("beforeunload", () => { if (bc) bc.close(); });
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+document.addEventListener("keydown", (e) => {
+  const t = document.activeElement && document.activeElement.tagName;
+  if (t === "INPUT" || t === "TEXTAREA") {
+    if (e.key === "Escape") document.activeElement.blur();
+    return;
+  }
+  const cmd = e.ctrlKey || e.metaKey;
+  const k = e.key;
+  const cx = canvasW / 2, cy = canvasH / 2;
 
-    ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => {
-      document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
-    });
+  if (k === "Escape") { if (state.helpOpen) hideHelp(); else if (isDrawing) isDrawing = false; return; }
+  if (k === "?" || k === "h" || k === "H") { e.preventDefault(); toggleHelp(); return; }
+  if (k === " ") { isSpaceDown = true; canvas.classList.add("panning"); e.preventDefault(); return; }
+  if (cmd && (k === "z" || k === "Z") && !e.shiftKey) { e.preventDefault(); globalUndo(); return; }
+  if (cmd && k === "0") { e.preventDefault(); resetView(true); return; }
+  if (cmd && (k === "+" || k === "=")) { e.preventDefault(); zoomAt(cx, cy, view.scale * 1.25); return; }
+  if (cmd && (k === "-" || k === "_")) { e.preventDefault(); zoomAt(cx, cy, view.scale / 1.25); return; }
+  if (k === "Delete") {
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastDeleteTime < DELETE_DOUBLE_MS) { lastDeleteTime = 0; clearImage(); }
+    else { lastDeleteTime = now; showStatus("Press Delete again to clear"); }
+    return;
+  }
+  if (k === "Backspace") { e.preventDefault(); globalUndo(); return; }
+  if (!cmd && (k === "c" || k === "C")) { e.preventDefault(); clearStrokes(); return; }
+  if (!cmd && (k === "e" || k === "E")) {
+    e.preventDefault();
+    state.colorIndex = (state.colorIndex + 1) % COLORS.length;
+    updateStateBadge(); broadcastState();
+    showStatus("Color: " + currentColor());
+    return;
+  }
+  if (k === "[") {
+    e.preventDefault();
+    state.widthIndex = Math.max(0, state.widthIndex - 1);
+    updateStateBadge(); broadcastState();
+    showStatus("Width: " + currentWidth());
+    return;
+  }
+  if (k === "]") {
+    e.preventDefault();
+    state.widthIndex = Math.min(LINE_WIDTHS.length - 1, state.widthIndex + 1);
+    updateStateBadge(); broadcastState();
+    showStatus("Width: " + currentWidth());
+    return;
+  }
+  if (!cmd && (k === "o" || k === "O")) { e.preventDefault(); fileInput.click(); return; }
+  if (!cmd && (k === "s" || k === "S")) { e.preventDefault(); downloadImage(); return; }
+  if (!cmd && (k === "i" || k === "I")) { e.preventDefault(); showImageInfo(); return; }
+  if (!cmd && (k === "f" || k === "F")) {
+    e.preventDefault();
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+    return;
+  }
+  if (k === "1") { e.preventDefault(); resetView(true); return; }
+  if (k === "2") { e.preventDefault(); zoomAt(cx, cy, 2); return; }
 
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("beforeunload", () => {
-      if (bc) bc.close();
-    });
+  const step = e.shiftKey ? 100 : 30;
+  if (k === "ArrowLeft") { e.preventDefault(); panBy(step, 0); return; }
+  if (k === "ArrowRight") { e.preventDefault(); panBy(-step, 0); return; }
+  if (k === "ArrowUp") { e.preventDefault(); panBy(0, step); return; }
+  if (k === "ArrowDown") { e.preventDefault(); panBy(0, -step); return; }
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key === " ") { isSpaceDown = false; canvas.classList.remove("panning"); }
+});
+window.addEventListener("blur", () => { isSpaceDown = false; canvas.classList.remove("panning"); });
 
-    // ============================================================
-    // KEYBOARD
-    // ============================================================
-    document.addEventListener("keydown", (e) => {
-      const t = document.activeElement && document.activeElement.tagName;
-      if (t === "INPUT" || t === "TEXTAREA") {
-        if (e.key === "Escape") document.activeElement.blur();
-        return;
-      }
+helpToggle.addEventListener("click", toggleHelp);
+helpClose.addEventListener("click", hideHelp);
+helpPanel.addEventListener("click", (e) => { if (e.target === helpPanel) hideHelp(); });
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0];
+  if (f) uploadOne(f);
+  fileInput.value = "";
+});
 
-      const cmd = e.ctrlKey || e.metaKey;
-      const k = e.key;
-
-      if (k === "Escape") {
-        if (state.helpOpen) { hideHelp(); return; }
-        if (isDrawing) { isDrawing = false; return; }
-        return;
-      }
-      if (k === "?" || k === "h" || k === "H") { e.preventDefault(); toggleHelp(); return; }
-      if (k === " ") {
-        isSpaceDown = true;
-        canvas.classList.add("panning");
-        e.preventDefault();
-        return;
-      }
-      if (cmd && (k === "z" || k === "Z") && !e.shiftKey) {
-        e.preventDefault(); globalUndo(); return;
-      }
-      if (cmd && k === "0") { e.preventDefault(); resetView(true); return; }
-      if (cmd && (k === "+" || k === "=")) {
-        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale * 1.25); return;
-      }
-      if (cmd && (k === "-" || k === "_")) {
-        e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, view.scale / 1.25); return;
-      }
-      if (k === "Delete") {
-        e.preventDefault();
-        const now = Date.now();
-        if (now - lastDeleteTime < DELETE_DOUBLE_MS) {
-          lastDeleteTime = 0; clearImage();
-        } else {
-          lastDeleteTime = now;
-          showStatus("Press Delete again to clear");
-        }
-        return;
-      }
-      if (k === "Backspace") { e.preventDefault(); globalUndo(); return; }
-      if (!cmd && (k === "c" || k === "C")) { e.preventDefault(); clearStrokes(); return; }
-      if (!cmd && (k === "e" || k === "E")) {
-        e.preventDefault();
-        state.colorIndex = (state.colorIndex + 1) % COLORS.length;
-        updateStateBadge(); broadcastState();
-        showStatus("Color: " + currentColor());
-        return;
-      }
-      if (k === "[") {
-        e.preventDefault();
-        state.widthIndex = Math.max(0, state.widthIndex - 1);
-        updateStateBadge(); broadcastState();
-        showStatus("Width: " + currentWidth());
-        return;
-      }
-      if (k === "]") {
-        e.preventDefault();
-        state.widthIndex = Math.min(LINE_WIDTHS.length - 1, state.widthIndex + 1);
-        updateStateBadge(); broadcastState();
-        showStatus("Width: " + currentWidth());
-        return;
-      }
-      if (!cmd && (k === "o" || k === "O")) { e.preventDefault(); fileInput.click(); return; }
-      if (!cmd && (k === "s" || k === "S")) { e.preventDefault(); downloadImage(); return; }
-      if (!cmd && (k === "i" || k === "I")) { e.preventDefault(); showImageInfo(); return; }
-      if (!cmd && (k === "f" || k === "F")) {
-        e.preventDefault();
-        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-        else document.exitFullscreen().catch(() => {});
-        return;
-      }
-      if (k === "1") { e.preventDefault(); resetView(true); return; }
-      if (k === "2") { e.preventDefault(); zoomAt(canvasW / 2, canvasH / 2, 2); return; }
-
-      const panStep = e.shiftKey ? 100 : 30;
-      if (k === "ArrowLeft") { e.preventDefault(); panBy(panStep, 0); return; }
-      if (k === "ArrowRight") { e.preventDefault(); panBy(-panStep, 0); return; }
-      if (k === "ArrowUp") { e.preventDefault(); panBy(0, panStep); return; }
-      if (k === "ArrowDown") { e.preventDefault(); panBy(0, -panStep); return; }
-    });
-
-    document.addEventListener("keyup", (e) => {
-      if (e.key === " ") { isSpaceDown = false; canvas.classList.remove("panning"); }
-    });
-    window.addEventListener("blur", () => {
-      isSpaceDown = false; canvas.classList.remove("panning");
-    });
-
-    // ============================================================
-    // HELP UI
-    // ============================================================
-    helpToggle.addEventListener("click", toggleHelp);
-    helpClose.addEventListener("click", hideHelp);
-    helpPanel.addEventListener("click", (e) => {
-      if (e.target === helpPanel) hideHelp();
-    });
-
-    fileInput.addEventListener("change", () => {
-      const f = fileInput.files[0];
-      if (f) uploadOne(f);
-      fileInput.value = "";
-    });
-
-    // ============================================================
-    // INIT
-    // ============================================================
-    resizeCanvas();
-  </script>
+resizeCanvas();
+</script>
 </body>
 </html>
